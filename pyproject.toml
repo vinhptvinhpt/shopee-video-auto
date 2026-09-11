@@ -1,0 +1,18 @@
+[project]
+name = "shopee-video-auto"
+version = "0.1.0"
+description = "Automation pipeline: find trending TikTok clips for best-selling Shopee affiliate products, remux them, and publish to Shopee Video with the product cart attached."
+requires-python = ">=3.11"
+dependencies = [
+    "playwright>=1.45",
+    "uiautomator2>=3.2",
+    "yt-dlp>=2024.8.6",
+    "PyYAML>=6.0",
+    "click>=8.1",
+]
+
+[project.scripts]
+shopee-auto = "shopee_auto.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

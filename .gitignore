@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+
+# runtime data: browser session, downloaded videos/thumbnails, sqlite state, logs
+data/browser_profile/
+data/downloads/
+data/logs/
+data/state.db
+data/state.db-*

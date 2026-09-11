@@ -1,0 +1,68 @@
+# Central configuration for the Shopee video-affiliate automation pipeline.
+# Values here are defaults you must review against your own Shopee account,
+# device, and network conditions before running unattended.
+
+daily_target: 10 # videos to publish per calendar day
+
+shopee_affiliate:
+  portal_url: "https://affiliate.shopee.vn/offer/product_pool"
+  # Persistent Playwright profile so you only log in to Shopee once by hand;
+  # the automation reuses that session on every run.
+  browser_profile_dir: "./data/browser_profile"
+  headless: false
+  bestseller_filter:
+    sort_by: "sales_volume" # matches the sort option label/value on the portal
+    min_sales: 100
+    category: null
+  max_candidates_per_run: 20
+  # CSS selectors for the affiliate portal's product list. Fill these in with
+  # Playwright codegen (see README "Calibrating selectors") since Shopee
+  # changes markup without notice and this cannot be verified from here.
+  selectors:
+    product_card: ""
+    product_name: ""
+    product_link: ""
+    product_thumbnail: ""
+    sort_dropdown: ""
+    sales_count: ""
+
+image_search:
+  engine: "google_lens"
+  search_url: "https://lens.google.com/upload"
+  max_results: 10
+  headless: false
+  selectors:
+    file_input: "input[type='file']"
+    result_link: ""
+
+tiktok:
+  min_views: 50000
+  max_candidates: 5
+  download_dir: "./data/downloads"
+  request_delay_seconds: 2
+
+phone:
+  adb_serial: null # null = use the only device attached; set explicitly if you connect more than one
+  shopee_app_package: "com.shopee.vn"
+  push_dir_on_device: "/sdcard/DCIM/ShopeeAutoUpload"
+  # uiautomator2 selectors (resourceId/text/description) for each screen of
+  # the ShopVideo posting flow. Discover them with `python -m uiautomator2 dump`
+  # or weditor against your own phone/app version — see README.
+  ui:
+    open_shop_video_entry: {}
+    select_video_from_gallery: {}
+    caption_input: {}
+    attach_product_button: {}
+    product_search_input: {}
+    product_search_result_item: {}
+    publish_button: {}
+    my_videos_tab: {}
+    latest_video_item: {}
+    cart_icon_on_video: {}
+
+state:
+  db_path: "./data/state.db"
+
+logging:
+  level: "INFO"
+  log_dir: "./data/logs"
