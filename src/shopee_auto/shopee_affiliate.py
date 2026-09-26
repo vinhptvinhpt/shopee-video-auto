@@ -108,8 +108,9 @@ class ShopeeAffiliateClient:
                 thumb = card.locator(sel["product_thumbnail"]).get_attribute("src") or ""
                 sales = None
                 if sel.get("sales_count"):
-                    sales_text = card.locator(sel["sales_count"]).inner_text()
-                    sales = _parse_sales_count(sales_text)
+                    sales_el = card.locator(sel["sales_count"])
+                    if sales_el.count() > 0:
+                        sales = _parse_sales_count(sales_el.first.inner_text())
                 if cfg.min_sales and sales is not None and sales < cfg.min_sales:
                     continue
                 if not thumb:
