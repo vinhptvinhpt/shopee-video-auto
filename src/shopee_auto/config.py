@@ -12,32 +12,15 @@ DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "config.y
 
 
 @dataclasses.dataclass
-class BestsellerFilter:
+class ProductSourceConfig:
+    """Products come from a CSV you export by hand via Shopee Affiliate's
+    own "Lấy link hàng loạt" (bulk get-link) feature, not from scraping the
+    portal -- browser automation against that admin panel gets flagged and
+    hit with a captcha. See README "Nguồn sản phẩm (CSV)"."""
+
+    csv_path: Path
     min_sales: int
-    category: str | None
-
-
-@dataclasses.dataclass
-class NavigationConfig:
-    """Text labels used to verify login and navigate the bestseller list,
-    confirmed against the real portal -- see README "Calibrating selectors"."""
-
-    category_link_text: str
-    bestseller_tab_text: str
-    close_popup_button_text: str
-
-
-@dataclasses.dataclass
-class ShopeeAffiliateConfig:
-    portal_url: str
-    browser_profile_dir: Path
-    headless: bool
-    channel: str | None
-    cdp_endpoint: str | None
-    bestseller_filter: BestsellerFilter
     max_candidates_per_run: int
-    navigation: NavigationConfig
-    selectors: dict[str, str]
 
 
 @dataclasses.dataclass
@@ -79,7 +62,7 @@ class LoggingConfig:
 @dataclasses.dataclass
 class AppConfig:
     daily_target: int
-    shopee_affiliate: ShopeeAffiliateConfig
+    product_source: ProductSourceConfig
     image_search: ImageSearchConfig
     tiktok: TikTokConfig
     phone: PhoneConfig
@@ -98,7 +81,7 @@ def load_config(path: Path | str = DEFAULT_CONFIG_PATH) -> AppConfig:
     raw: dict[str, Any] = yaml.safe_load(path.read_text(encoding="utf-8"))
     root_dir = path.resolve().parents[1]
 
-    sa = raw["shopee_affiliate"]
+    ps = raw["product_source"]
     ims = raw["image_search"]
     tk = raw["tiktok"]
     ph = raw["phone"]
@@ -108,16 +91,10 @@ def load_config(path: Path | str = DEFAULT_CONFIG_PATH) -> AppConfig:
     return AppConfig(
         daily_target=raw["daily_target"],
         root_dir=root_dir,
-        shopee_affiliate=ShopeeAffiliateConfig(
-            portal_url=sa["portal_url"],
-            browser_profile_dir=_resolve(root_dir, sa["browser_profile_dir"]),
-            headless=sa["headless"],
-            channel=sa.get("channel"),
-            cdp_endpoint=sa.get("cdp_endpoint"),
-            bestseller_filter=BestsellerFilter(**sa["bestseller_filter"]),
-            max_candidates_per_run=sa["max_candidates_per_run"],
-            navigation=NavigationConfig(**sa["navigation"]),
-            selectors=sa["selectors"],
+        product_source=ProductSourceConfig(
+            csv_path=_resolve(root_dir, ps["csv_path"]),
+            min_sales=ps["min_sales"],
+            max_candidates_per_run=ps["max_candidates_per_run"],
         ),
         image_search=ImageSearchConfig(
             engine=ims["engine"],

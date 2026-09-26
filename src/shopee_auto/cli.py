@@ -89,9 +89,12 @@ def check_setup(cfg) -> None:
         ok = False
         click.echo(f"[FAIL] yt-dlp: {exc}")
 
-    if not cfg.shopee_affiliate.selectors.get("product_card"):
+    if not cfg.product_source.csv_path.exists():
         ok = False
-        click.echo("[FAIL] config.shopee_affiliate.selectors chưa được điền")
+        click.echo(
+            f"[FAIL] Không thấy file CSV tại {cfg.product_source.csv_path} "
+            "— xuất bằng \"Lấy link hàng loạt\" trên Shopee Affiliate rồi đặt đúng đường dẫn"
+        )
 
     if not any(cfg.phone.ui.values()):
         ok = False

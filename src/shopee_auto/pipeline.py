@@ -1,5 +1,5 @@
-"""Orchestrate one full product cycle (find bestseller -> match TikTok clip
--> publish on Shopee -> verify) and the daily loop over the configured
+"""Orchestrate one full product cycle (read product from CSV -> match TikTok
+clip -> publish on Shopee -> verify) and the daily loop over the configured
 target. Every product is isolated in a try/except so one bad product
 (captcha, missing UI element, no matching clip) never aborts the rest of the
 day's run.
@@ -13,7 +13,8 @@ from shopee_auto.config import AppConfig
 from shopee_auto.image_search import CaptchaEncounteredError, GoogleLensSearch
 from shopee_auto.logger import get_logger
 from shopee_auto.phone_control import PhoneAutomationError, PhoneController
-from shopee_auto.shopee_affiliate import Product, ShopeeAffiliateClient
+from shopee_auto.product_source import Product
+from shopee_auto import product_source
 from shopee_auto.state import StateStore
 from shopee_auto import tiktok
 
@@ -43,26 +44,22 @@ class Pipeline:
             log.info("Đã đạt chỉ tiêu %d video hôm nay, dừng.", self.cfg.daily_target)
             return []
 
+        products = product_source.load_products(self.cfg.product_source)
+        candidates = [p for p in products if not self.state.is_product_posted(p.link)]
+        log.info(
+            "%d/%d sản phẩm chưa đăng, cần đăng thêm %d video",
+            len(candidates),
+            len(products),
+            remaining,
+        )
+
         results: list[CycleResult] = []
-        with ShopeeAffiliateClient(self.cfg.shopee_affiliate) as shopee, GoogleLensSearch(
-            self.cfg.image_search
-        ) as lens, PhoneController(self.cfg.phone) as phone:
-            shopee.ensure_logged_in()
+        with GoogleLensSearch(self.cfg.image_search) as lens, PhoneController(self.cfg.phone) as phone:
             phone.check_ready()
-
-            products = shopee.fetch_bestseller_products()
-            candidates = [p for p in products if not self.state.is_product_posted(p.link)]
-            log.info(
-                "%d/%d sản phẩm chưa đăng, cần đăng thêm %d video",
-                len(candidates),
-                len(products),
-                remaining,
-            )
-
             for product in candidates:
                 if len(results) >= remaining:
                     break
-                results.append(self._run_one(product, shopee, lens, phone))
+                results.append(self._run_one(product, lens, phone))
 
         posted = sum(1 for r in results if r.status == "success")
         log.info("Hoàn tất đợt chạy: %d/%d video đăng thành công", posted, len(results))
@@ -71,13 +68,12 @@ class Pipeline:
     def _run_one(
         self,
         product: Product,
-        shopee: ShopeeAffiliateClient,
         lens: GoogleLensSearch,
         phone: PhoneController,
     ) -> CycleResult:
         log.info("=== Xử lý sản phẩm: %s ===", product.name)
         try:
-            thumb_path = shopee.download_thumbnail(
+            thumb_path = product_source.download_thumbnail(
                 product, self.cfg.tiktok.download_dir / "thumbnails"
             )
             self.state.log_stage(product.link, "thumbnail", "success")
