@@ -10,6 +10,12 @@ shopee_affiliate:
   # the automation reuses that session on every run.
   browser_profile_dir: "./data/browser_profile"
   headless: false
+  # Use your real installed Google Chrome instead of Playwright's bundled
+  # "Chrome for Testing" build. Google blocks Google-account sign-in from
+  # the bundled build; reusing your real Chrome (with a copied, already
+  # logged-in profile -- see README "Google sign-in blocked") avoids ever
+  # hitting that block. Leave null to use the bundled Chromium.
+  channel: "chrome"
   bestseller_filter:
     sort_by: "sales_volume" # matches the sort option label/value on the portal
     min_sales: 100

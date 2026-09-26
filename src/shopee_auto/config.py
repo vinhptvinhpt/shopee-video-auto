@@ -23,6 +23,7 @@ class ShopeeAffiliateConfig:
     portal_url: str
     browser_profile_dir: Path
     headless: bool
+    channel: str | None
     bestseller_filter: BestsellerFilter
     max_candidates_per_run: int
     selectors: dict[str, str]
@@ -100,6 +101,7 @@ def load_config(path: Path | str = DEFAULT_CONFIG_PATH) -> AppConfig:
             portal_url=sa["portal_url"],
             browser_profile_dir=_resolve(root_dir, sa["browser_profile_dir"]),
             headless=sa["headless"],
+            channel=sa.get("channel"),
             bestseller_filter=BestsellerFilter(**sa["bestseller_filter"]),
             max_candidates_per_run=sa["max_candidates_per_run"],
             selectors=sa["selectors"],

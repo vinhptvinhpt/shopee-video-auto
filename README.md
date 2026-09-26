@@ -101,6 +101,41 @@ Bạn cần tự lấy selector thật của mình rồi điền vào `config/co
 Chạy `shopee-auto check-setup` để kiểm tra Playwright/ADB/yt-dlp hoạt động và
 cảnh báo nếu selector còn thiếu, trước khi chạy `run-once`.
 
+## Google chặn đăng nhập ("Couldn't sign you in")
+
+Nếu tài khoản Shopee của bạn đăng nhập qua Google, bạn sẽ gặp trang
+"This browser or app may not be secure" khi bấm nút Google trong cửa sổ
+Playwright mở ra. Đây không phải lỗi tạm thời — Google **luôn** chặn đăng
+nhập OAuth từ trình duyệt tự động hóa (banner "Chrome is being controlled by
+automated test software"), nên đăng nhập lại trong đó sẽ không bao giờ
+thành công.
+
+Cách khắc phục: đừng đăng nhập lại trong Playwright, hãy **tái sử dụng
+session đã đăng nhập sẵn trên Chrome thật** của bạn.
+
+1. `shopee_affiliate.channel: "chrome"` trong `config.yaml` (mặc định đã bật)
+   khiến Playwright điều khiển đúng Chrome thật đã cài trên máy thay vì
+   bản Chromium test đi kèm.
+2. Đóng **toàn bộ** cửa sổ Chrome đang mở (Chrome khóa file hồ sơ khi đang
+   chạy, không copy được nếu còn cửa sổ mở).
+3. Tìm đường dẫn hồ sơ Chrome thật đang đăng nhập Shopee: mở Chrome, gõ
+   `chrome://version` vào thanh địa chỉ, xem dòng **Profile Path** — ví dụ
+   `C:\Users\<ten>\AppData\Local\Google\Chrome\User Data\Default`.
+4. Copy nội dung thư mục đó vào đúng vị trí Playwright sẽ đọc
+   (`data/browser_profile/Default/`):
+   ```cmd
+   mkdir data\browser_profile\Default
+   xcopy "C:\Users\<ten>\AppData\Local\Google\Chrome\User Data\Default" "data\browser_profile\Default" /E /I /H /Y
+   ```
+5. Chạy lại bước đăng nhập ở trên — lần này trang sẽ mở ra và **đã đăng
+   nhập sẵn**, không còn phải bấm nút Google nữa.
+
+Lưu ý: thao tác này copy toàn bộ hồ sơ Chrome (cookie mọi trang web, mật
+khẩu đã lưu, autofill...), không chỉ riêng Shopee. Nếu muốn tách biệt, tạo
+một hồ sơ Chrome phụ riêng cho việc này (Chrome hỗ trợ nhiều profile), đăng
+nhập Shopee trong hồ sơ phụ đó, rồi trỏ Bước 3-4 vào hồ sơ phụ thay vì hồ
+sơ chính bạn dùng hàng ngày.
+
 ## Chạy
 
 ```bash

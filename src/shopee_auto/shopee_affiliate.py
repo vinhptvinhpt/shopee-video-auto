@@ -42,9 +42,11 @@ class ShopeeAffiliateClient:
     def __enter__(self) -> "ShopeeAffiliateClient":
         self._cfg.browser_profile_dir.mkdir(parents=True, exist_ok=True)
         self._playwright = sync_playwright().start()
+        launch_kwargs: dict = {"headless": self._cfg.headless}
+        if self._cfg.channel:
+            launch_kwargs["channel"] = self._cfg.channel
         self._context = self._playwright.chromium.launch_persistent_context(
-            str(self._cfg.browser_profile_dir),
-            headless=self._cfg.headless,
+            str(self._cfg.browser_profile_dir), **launch_kwargs
         )
         return self
 
