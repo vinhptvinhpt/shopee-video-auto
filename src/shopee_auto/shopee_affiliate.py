@@ -70,49 +70,56 @@ class ShopeeAffiliateClient:
             self._playwright.stop()
 
     def ensure_logged_in(self) -> None:
-        """First run must be done with headless=false so you can log into
-        Shopee affiliate manually once; the session then persists in
-        browser_profile_dir for every future run."""
+        """First run must be done with headless=false (or via cdp_endpoint,
+        see README) so you can log into Shopee affiliate manually once; the
+        session then persists for every future run."""
+        nav = self._cfg.navigation
         page = self._context.new_page()
-        page.goto(self._cfg.portal_url, wait_until="networkidle")
-        sel = self._cfg.selectors
-        if sel.get("product_card") and page.locator(sel["product_card"]).count() == 0:
+        try:
+            page.goto(self._cfg.portal_url, wait_until="networkidle")
+            if page.get_by_role("link", name=nav.category_link_text).count() == 0:
+                raise NotLoggedInError(
+                    f"Không thấy menu '{nav.category_link_text}' trên affiliate portal "
+                    "— có thể chưa đăng nhập, hoặc Shopee đã đổi nhãn menu."
+                )
+        finally:
             page.close()
-            raise NotLoggedInError(
-                "Không thấy danh sách sản phẩm trên affiliate portal. "
-                "Chạy lại với headless=false và đăng nhập Shopee thủ công một lần."
-            )
-        page.close()
 
     def fetch_bestseller_products(self) -> list[Product]:
+        """Navigate to the bestseller tab, then for each product card: open
+        its popup, click "Lấy link" -> "Sao chép Link" to reveal the real
+        affiliate link (there is no plain href to scrape here), and read the
+        name/link back out of the popup's DOM.
+        """
+        nav = self._cfg.navigation
         sel = self._cfg.selectors
         cfg = self._cfg.bestseller_filter
         page = self._context.new_page()
         try:
             page.goto(self._cfg.portal_url, wait_until="networkidle")
-
-            if sel.get("sort_dropdown"):
-                page.locator(sel["sort_dropdown"]).click()
-                page.get_by_text(cfg.sort_by, exact=False).click()
-                page.wait_for_load_state("networkidle")
+            page.get_by_role("link", name=nav.category_link_text).click()
+            page.get_by_text(nav.bestseller_tab_text).click()
+            page.wait_for_load_state("networkidle")
 
             cards = page.locator(sel["product_card"])
             count = min(cards.count(), self._cfg.max_candidates_per_run)
             products: list[Product] = []
             for i in range(count):
                 card = cards.nth(i)
-                name = card.locator(sel["product_name"]).inner_text().strip()
-                link = card.locator(sel["product_link"]).get_attribute("href") or ""
-                thumb = card.locator(sel["product_thumbnail"]).get_attribute("src") or ""
+                thumb = card.locator("img").first.get_attribute("src") or ""
                 sales = None
                 if sel.get("sales_count"):
                     sales_text = card.locator(sel["sales_count"]).inner_text()
                     sales = _parse_sales_count(sales_text)
-
                 if cfg.min_sales and sales is not None and sales < cfg.min_sales:
                     continue
-                if not link or not thumb:
-                    log.warning("Bỏ qua sản phẩm thiếu link/thumbnail: %s", name)
+
+                name, link = self._open_product_and_get_link(page, card)
+                if not link:
+                    log.warning("Bỏ qua sản phẩm không lấy được link: %s", name)
+                    continue
+                if not thumb:
+                    log.warning("Bỏ qua sản phẩm thiếu thumbnail: %s", name)
                     continue
                 products.append(Product(name=name, link=link, thumbnail_url=thumb, sales_count=sales))
 
@@ -120,6 +127,31 @@ class ShopeeAffiliateClient:
             return products
         finally:
             page.close()
+
+    def _open_product_and_get_link(self, page, card) -> tuple[str, str]:
+        nav = self._cfg.navigation
+        sel = self._cfg.selectors
+        with page.expect_popup() as popup_info:
+            card.click()
+        popup = popup_info.value
+        try:
+            popup.wait_for_load_state("networkidle")
+            name = popup.locator(sel["product_title_in_popup"]).inner_text().strip()
+            popup.get_by_role("button", name=nav.get_link_button_text).click()
+            popup.get_by_role("button", name=nav.copy_link_button_text).click()
+            link_el = popup.locator(sel["product_link_value"])
+            try:
+                link = link_el.input_value()
+            except Exception:  # noqa: BLE001 - not an <input>, fall back to visible text
+                link = link_el.inner_text().strip()
+            return name, link
+        finally:
+            try:
+                popup.get_by_role("button", name=nav.close_popup_button_text).click(timeout=3000)
+            except Exception:  # noqa: BLE001 - best-effort cleanup, don't mask the real error
+                pass
+            if not popup.is_closed():
+                popup.close()
 
     def download_thumbnail(self, product: Product, dest_dir: Path) -> Path:
         dest_dir.mkdir(parents=True, exist_ok=True)

@@ -13,9 +13,21 @@ DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "config.y
 
 @dataclasses.dataclass
 class BestsellerFilter:
-    sort_by: str
     min_sales: int
     category: str | None
+
+
+@dataclasses.dataclass
+class NavigationConfig:
+    """Text labels clicked to reach the bestseller list and to pull an
+    affiliate link out of a product's popup. Discovered via Playwright
+    codegen against the real portal -- see README "Calibrating selectors"."""
+
+    category_link_text: str
+    bestseller_tab_text: str
+    get_link_button_text: str
+    copy_link_button_text: str
+    close_popup_button_text: str
 
 
 @dataclasses.dataclass
@@ -27,6 +39,7 @@ class ShopeeAffiliateConfig:
     cdp_endpoint: str | None
     bestseller_filter: BestsellerFilter
     max_candidates_per_run: int
+    navigation: NavigationConfig
     selectors: dict[str, str]
 
 
@@ -106,6 +119,7 @@ def load_config(path: Path | str = DEFAULT_CONFIG_PATH) -> AppConfig:
             cdp_endpoint=sa.get("cdp_endpoint"),
             bestseller_filter=BestsellerFilter(**sa["bestseller_filter"]),
             max_candidates_per_run=sa["max_candidates_per_run"],
+            navigation=NavigationConfig(**sa["navigation"]),
             selectors=sa["selectors"],
         ),
         image_search=ImageSearchConfig(

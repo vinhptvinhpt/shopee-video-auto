@@ -22,20 +22,28 @@ shopee_affiliate:
   # launch_persistent_context above.
   cdp_endpoint: null
   bestseller_filter:
-    sort_by: "sales_volume" # matches the sort option label/value on the portal
     min_sales: 100
     category: null
   max_candidates_per_run: 20
-  # CSS selectors for the affiliate portal's product list. Fill these in with
-  # Playwright codegen (see README "Calibrating selectors") since Shopee
-  # changes markup without notice and this cannot be verified from here.
+  # Real navigation flow recorded via Playwright codegen against the actual
+  # portal: click into "Hoa hồng Sản phẩm" -> "Bán chạy nhất", then each
+  # product opens a *popup* where you must click "Lấy link" then "Sao chép
+  # Link" to reveal the real affiliate link -- there is no plain href to
+  # scrape. Update these labels if Shopee changes the wording.
+  navigation:
+    category_link_text: "Hoa hồng Sản phẩm"
+    bestseller_tab_text: "Bán chạy nhất"
+    get_link_button_text: "Lấy link"
+    copy_link_button_text: "Sao chép Link"
+    close_popup_button_text: "Close"
+  # CSS selectors that still need calibrating with Playwright codegen/DevTools
+  # "Copy selector" (see README "Calibrating selectors"): these vary by exact
+  # markup and can't be guessed generically.
   selectors:
-    product_card: ""
-    product_name: ""
-    product_link: ""
-    product_thumbnail: ""
-    sort_dropdown: ""
-    sales_count: ""
+    product_card: "" # one repeating product card in the bestseller grid (the clickable element that opens the popup)
+    product_title_in_popup: "" # the product name/title element inside the popup
+    product_link_value: "" # the input/text element that shows the link after "Lấy link" + "Sao chép Link"
+    sales_count: "" # optional: text element showing units sold, for min_sales filtering
 
 image_search:
   engine: "google_lens"
