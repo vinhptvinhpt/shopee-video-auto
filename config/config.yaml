@@ -5,7 +5,7 @@
 daily_target: 10 # videos to publish per calendar day
 
 shopee_affiliate:
-  portal_url: "https://affiliate.shopee.vn/offer/product_pool"
+  portal_url: "https://affiliate.shopee.vn/offer/product_offer"
   # Persistent Playwright profile so you only log in to Shopee once by hand;
   # the automation reuses that session on every run.
   browser_profile_dir: "./data/browser_profile"

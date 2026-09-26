@@ -77,7 +77,7 @@ Bạn cần tự lấy selector thật của mình rồi điền vào `config/co
 
 - **Web (Shopee Affiliate portal, Google Lens)**: dùng Playwright Codegen —
   ```bash
-  playwright codegen https://affiliate.shopee.vn/offer/product_pool
+  playwright codegen https://affiliate.shopee.vn/offer/product_offer
   ```
   thao tác thử filter/sort/click sản phẩm, Codegen sẽ in ra CSS selector
   tương ứng để bạn copy vào `shopee_affiliate.selectors` / `image_search.selectors`.
@@ -132,7 +132,7 @@ toàn thủ công, Google không có gì để chặn.
    "controlled by automated software" vì đây chưa phải Playwright điều
    khiển). `--user-data-dir` trỏ tới thư mục mới để tách biệt, không đụng
    vào hồ sơ Chrome bạn dùng hàng ngày.
-3. Trong cửa sổ đó, vào `https://affiliate.shopee.vn/offer/product_pool`,
+3. Trong cửa sổ đó, vào `https://affiliate.shopee.vn/offer/product_offer`,
    đăng nhập Shopee (kể cả qua Google) như bình thường. **Giữ nguyên cửa sổ
    này mở**, đừng tắt.
 4. Sửa `config/config.yaml`: đặt `shopee_affiliate.cdp_endpoint: "http://localhost:9222"`.
