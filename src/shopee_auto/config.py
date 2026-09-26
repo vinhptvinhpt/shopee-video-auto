@@ -19,14 +19,11 @@ class BestsellerFilter:
 
 @dataclasses.dataclass
 class NavigationConfig:
-    """Text labels clicked to reach the bestseller list and to pull an
-    affiliate link out of a product's popup. Discovered via Playwright
-    codegen against the real portal -- see README "Calibrating selectors"."""
+    """Text labels used to verify login and navigate the bestseller list,
+    confirmed against the real portal -- see README "Calibrating selectors"."""
 
     category_link_text: str
     bestseller_tab_text: str
-    get_link_button_text: str
-    copy_link_button_text: str
     close_popup_button_text: str
 
 

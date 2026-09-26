@@ -128,19 +128,23 @@ class ShopeeAffiliateClient:
             page.close()
 
     def _get_affiliate_link(self, card) -> str:
+        """Click the card's "Lấy link" button; the modal that opens shows
+        the shortened link in a disabled <textarea> as soon as the backend
+        generates it, so poll briefly instead of assuming it's there on the
+        first frame."""
         nav = self._cfg.navigation
         sel = self._cfg.selectors
         page = card.page
         card.locator(sel["get_link_button"]).click()
+        link_el = page.locator(sel["product_link_value"])
         try:
-            copy_btn = page.get_by_role("button", name=nav.copy_link_button_text)
-            copy_btn.wait_for(timeout=5000)
-            copy_btn.click()
-            link_el = page.locator(sel["product_link_value"])
-            try:
-                link = link_el.input_value()
-            except Exception:  # noqa: BLE001 - not an <input>, fall back to visible text
-                link = link_el.inner_text().strip()
+            link_el.wait_for(timeout=8000)
+            link = ""
+            for _ in range(20):
+                link = (link_el.input_value() or "").strip()
+                if link:
+                    break
+                page.wait_for_timeout(200)
             return link
         finally:
             try:

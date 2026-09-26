@@ -28,27 +28,24 @@ shopee_affiliate:
   # Real navigation flow, confirmed from the actual portal's DOM (Ant Design
   # app, class names are BEM-style and stable): click the "Bán chạy nhất"
   # tab, then each product card has its own "Lấy link" button right on the
-  # list -- no need to open a popup/product page at all. Clicking it opens
-  # an Ant Design modal; click "Sao chép Link" inside that modal to reveal
-  # the real tracked affiliate link, then close the modal.
+  # list. Clicking it opens an Ant Design modal that already shows the
+  # tracked affiliate link -- see selectors.product_link_value below.
   navigation:
-    category_link_text: "Hoa hồng Sản phẩm"
+    category_link_text: "Hoa hồng Sản phẩm" # used only to sanity-check that you're logged in
     bestseller_tab_text: "Bán chạy nhất"
-    get_link_button_text: "Lấy link"
-    copy_link_button_text: "Sao chép Link"
-    close_popup_button_text: "Close"
-  # CSS selectors confirmed from the portal's real DOM (see the ant-design
-  # class names below), except product_link_value which still needs
-  # calibrating: click "Lấy link" on one product, then DevTools-inspect the
-  # element that shows the resulting link text/input inside the modal (see
-  # README "Calibrating selectors").
+    close_popup_button_text: "Close" # the modal's "X" icon has this as its aria-label
+  # CSS selectors confirmed from the portal's real DOM (Ant Design class
+  # names, stable across accounts). Clicking "Lấy link" opens a
+  # ".get-link-modal" dialog whose <textarea disabled> already shows the
+  # shortened affiliate link immediately -- no need to click "Sao chép
+  # Link" at all, we just read the textarea's value.
   selectors:
     product_card: ".AffiliateItemCard" # one repeating product card in the bestseller grid
     product_name: ".ItemCard__name"
     product_thumbnail: ".ItemCard__image img"
     sales_count: ".ItemCardSold_wrap" # e.g. "5k+ lượt bán" / "1tr+ lượt bán"
     get_link_button: ".AffiliateItemCard__getlinkBtn" # the in-card "Lấy link" button
-    product_link_value: "" # STILL NEEDED: element showing the link inside the "Sao chép Link" modal
+    product_link_value: ".get-link-modal textarea" # the disabled textarea showing the link
 
 image_search:
   engine: "google_lens"
