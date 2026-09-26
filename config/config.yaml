@@ -4,14 +4,17 @@
 
 daily_target: 5 # videos to publish per calendar day
 
-# Products come from a CSV you export by hand via Shopee Affiliate's own
+# Products come from CSVs you export by hand via Shopee Affiliate's own
 # "Lấy link hàng loạt" (bulk get-link) feature -- automating that admin
 # panel with a browser got the account captcha-challenged, so there is no
-# scraping here at all. Run `shopee-auto import-csv` after exporting to load
-# new products into the durable queue (data/state.db) that run-daily pulls
-# from -- see README "Nguồn sản phẩm (CSV) và hàng đợi".
+# scraping here at all. Just drop exported CSV files into input_dir; every
+# run-daily/run-once automatically scans it and enqueues products from any
+# file it hasn't imported yet (tracked by content hash, not filename or
+# timestamp, so a re-saved/renamed copy of an already-imported file is
+# correctly recognized as not new). See README "Nguồn sản phẩm (CSV) và
+# hàng đợi".
 product_source:
-  csv_path: "./data/products_export.csv"
+  input_dir: "./data/input_csv"
   min_sales: 100 # parsed from the CSV's "Doanh thu" column, e.g. "300k+" -> 300000
 
 image_search:

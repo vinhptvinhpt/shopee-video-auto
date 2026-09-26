@@ -4,11 +4,12 @@ configured target. Every product is isolated in a try/except so one bad
 product (captcha, missing UI element, no matching clip) never aborts the
 rest of the day's run.
 
-Importing a CSV (`Pipeline.import_csv`) and running the daily loop are
-deliberately separate: import once (or whenever you export a new CSV) to
-fill the queue, then run-daily just drains up to `daily_target` pending
-items off it each day -- overflow automatically waits for the next day
-since it's simply still "pending" in the queue.
+Every run first scans `product_source.input_dir` for CSV exports it hasn't
+seen before (by content hash) and enqueues whatever's in them -- you just
+drop exported files in that folder, nothing else to run by hand. Then
+run-daily drains up to `daily_target` pending items off the queue each day;
+overflow automatically waits for the next day since it's simply still
+"pending".
 """
 
 from __future__ import annotations
@@ -42,14 +43,28 @@ class Pipeline:
     def close(self) -> None:
         self.state.close()
 
-    def import_csv(self) -> tuple[int, int]:
-        """Read the configured CSV and enqueue any products not already in
-        the queue (whether from an earlier import or an overlapping export).
-        Returns (added, duplicates)."""
-        products = product_source.load_products(self.cfg.product_source)
-        return self.state.enqueue_products(products)
+    def import_new_csvs(self) -> tuple[int, int, int]:
+        """Scan product_source.input_dir for CSV files not yet imported (by
+        content hash), enqueue their products (deduped against the queue and
+        against each other), and record each file as imported so it's never
+        re-read. Returns (files_imported, products_added, products_duplicate).
+        """
+        files_imported = products_added = products_duplicate = 0
+        for path in product_source.list_csv_files(self.cfg.product_source.input_dir):
+            fingerprint = product_source.file_fingerprint(path)
+            if self.state.is_file_imported(fingerprint):
+                continue
+            products = product_source.load_products_from_file(path, self.cfg.product_source.min_sales)
+            added, duplicates = self.state.enqueue_products(products)
+            self.state.mark_file_imported(fingerprint, path.name, added)
+            files_imported += 1
+            products_added += added
+            products_duplicate += duplicates
+            log.info("Đã nạp %s: %d sản phẩm mới, %d trùng", path.name, added, duplicates)
+        return files_imported, products_added, products_duplicate
 
     def run_daily(self, max_videos: int | None = None) -> list[CycleResult]:
+        self.import_new_csvs()
         remaining = self.cfg.daily_target - self.state.count_posted_today()
         if max_videos is not None:
             remaining = min(remaining, max_videos)
@@ -59,7 +74,10 @@ class Pipeline:
 
         candidates = self.state.get_pending_queue(remaining)
         if not candidates:
-            log.info("Hàng đợi rỗng -- chạy `import-csv` để nạp thêm sản phẩm.")
+            log.info(
+                "Hàng đợi rỗng -- thả file CSV mới vào %s rồi chạy lại.",
+                self.cfg.product_source.input_dir,
+            )
             return []
         log.info("Lấy %d sản phẩm từ hàng đợi (cần đăng thêm %d video)", len(candidates), remaining)
 

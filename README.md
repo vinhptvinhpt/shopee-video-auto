@@ -72,7 +72,8 @@ trong môi trường sandbox này. Phần dưới đây là hướng dẫn cài 
 
 ## Nguồn sản phẩm (CSV) và hàng đợi
 
-Nhập sản phẩm và đăng bài hàng ngày là hai việc tách biệt:
+Bạn chỉ cần **thả file CSV vào một thư mục** — không cần đổi tên, không cần
+tự chạy lệnh nạp riêng:
 
 1. Vào Shopee Affiliate (`https://affiliate.shopee.vn/offer/product_offer`),
    tab **"Bán chạy nhất"**, tự chọn sản phẩm muốn affiliate theo tiêu chí
@@ -80,27 +81,27 @@ Nhập sản phẩm và đăng bài hàng ngày là hai việc tách biệt:
 2. Dùng chức năng **"Lấy link hàng loạt"** → xuất file CSV (các cột:
    `Tên sản phẩm`, `Doanh thu`, `Link sản phẩm`, `Link ưu đãi`, ...). File
    có thể chứa rất nhiều dòng, có thể trùng hoặc không — không sao cả.
-3. Di chuyển/đổi tên file CSV vừa tải về thành đúng đường dẫn cấu hình ở
-   `product_source.csv_path` trong `config/config.yaml` (mặc định
-   `./data/products_export.csv`).
-4. Nạp vào hàng đợi:
-   ```bash
-   shopee-auto import-csv
-   ```
-   Lệnh này đọc CSV, tự bỏ qua dòng trùng link **trong chính file** lẫn
-   những sản phẩm **đã có trong hàng đợi hoặc đã đăng từ trước** (kể cả từ
-   lần import khác, file khác), rồi thêm phần còn lại vào hàng đợi bền vững
-   trong `data/state.db`. In ra số lượng đã nạp mới / bị bỏ qua vì trùng.
+3. Copy nguyên file CSV vừa tải về vào thư mục `product_source.input_dir`
+   trong `config/config.yaml` (mặc định `./data/input_csv`) — giữ nguyên
+   tên file gốc cũng được, không cần đổi gì cả.
 
-`run-daily`/`run-once` **không đọc CSV** — chỉ rút tối đa `daily_target`
-sản phẩm **đang chờ** (`pending`) ra khỏi hàng đợi theo đúng thứ tự đã nạp
-(vào trước xử lý trước). Vì vậy:
-- Bạn có thể `import-csv` bất cứ lúc nào (kể cả nhiều file khác nhau theo
-  thời gian) mà không lo trùng lặp.
+Mỗi lần `run-daily`/`run-once` chạy, nó **tự quét thư mục này trước**, nhận
+diện file nào là mới bằng cách **hash nội dung file** (không dựa vào tên
+hay thời gian sửa đổi — copy/đổi tên một file đã nạp rồi vẫn được nhận ra
+là file cũ, không nạp lại), rồi tự nạp sản phẩm từ các file mới đó vào một
+hàng đợi bền vững trong `data/state.db`. Muốn kiểm tra ngay việc quét mà
+chưa chạy cả pipeline, dùng:
+```bash
+shopee-auto import-csv
+```
+
+Cơ chế hàng đợi đảm bảo:
+- Một sản phẩm (theo "Link ưu đãi") chỉ được nạp **đúng 1 lần**, dù bạn thả
+  bao nhiêu file chồng lặp nhau vào thư mục theo thời gian.
 - Nếu hàng đợi có nhiều hơn `daily_target` sản phẩm, phần dư **tự động**
   chờ đến lượt chạy hôm sau — không cần logic "carry over" nào thêm, vì nó
   đơn giản là vẫn còn `pending` trong DB.
-- Xóa hay thay file CSV sau khi `import-csv` không ảnh hưởng gì — hàng đợi
+- Xóa file CSV khỏi thư mục sau khi đã quét không ảnh hưởng gì — hàng đợi
   đã độc lập với file.
 
 Thumbnail sản phẩm được lấy bằng cách gọi HTTP GET thẳng vào "Link sản phẩm"
@@ -147,14 +148,14 @@ trước khi chạy `run-once`.
 # kiểm tra môi trường trước
 shopee-auto check-setup
 
-# nạp sản phẩm mới từ CSV vào hàng đợi (chạy lại bất cứ khi nào có CSV mới)
+# (tuỳ chọn) chỉ quét thư mục input_dir và nạp file mới, không đăng gì cả
 shopee-auto import-csv
 
-# đăng thử đúng 1 video để kiểm tra toàn bộ luồng
+# đăng thử đúng 1 video để kiểm tra toàn bộ luồng (tự quét input_dir trước)
 shopee-auto run-once
 
 # chạy đủ chỉ tiêu trong ngày (mặc định 5 video, dừng sớm nếu đã đủ
-# hoặc hàng đợi hết sản phẩm)
+# hoặc hàng đợi hết sản phẩm) -- cũng tự quét input_dir trước
 shopee-auto run-daily
 ```
 
@@ -163,8 +164,8 @@ Scheduler (Windows), ví dụ cron 8h sáng mỗi ngày:
 ```
 0 8 * * * cd /path/to/shopee-video-auto && /usr/bin/env PATH=$PATH shopee-auto run-daily >> data/logs/cron.log 2>&1
 ```
-`import-csv` không cần chạy theo lịch — chỉ chạy khi bạn có CSV mới muốn
-nạp thêm; `run-daily` tự rút từ hàng đợi đã có sẵn.
+Không cần lịch riêng cho `import-csv` — `run-daily` đã tự quét thư mục mỗi
+lần chạy. Bạn chỉ cần nhớ thả file CSV vào `input_dir` trước giờ cron chạy.
 
 ## Chống trùng lặp & giới hạn hàng ngày
 
@@ -179,10 +180,9 @@ Hai lớp bảo vệ độc lập trong `data/state.db` (SQLite):
 
 ## Xử lý sự cố thường gặp
 
-- **`NoCsvFoundError`**: chưa xuất/đặt đúng file CSV cho `import-csv` — xem
-  mục "Nguồn sản phẩm (CSV) và hàng đợi".
-- **Hàng đợi rỗng khi chạy `run-daily`**: chạy `shopee-auto import-csv` để
-  nạp thêm sản phẩm.
+- **Hàng đợi rỗng khi chạy `run-daily`**: chưa có file CSV nào trong
+  `product_source.input_dir` — thả file xuất từ "Lấy link hàng loạt" vào
+  đó rồi chạy lại (hoặc chạy `shopee-auto import-csv` để kiểm tra ngay).
 - **`CaptchaEncounteredError`**: Google Lens phát hiện traffic bất thường.
   Pipeline tự bỏ qua sản phẩm đó và sang sản phẩm tiếp theo; nếu xảy ra liên
   tục, giãn `tiktok.request_delay_seconds` hoặc tạm dừng vài giờ.

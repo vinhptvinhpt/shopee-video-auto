@@ -13,12 +13,12 @@ DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "config.y
 
 @dataclasses.dataclass
 class ProductSourceConfig:
-    """Products come from a CSV you export by hand via Shopee Affiliate's
-    own "Lấy link hàng loạt" (bulk get-link) feature, not from scraping the
-    portal -- browser automation against that admin panel gets flagged and
-    hit with a captcha. See README "Nguồn sản phẩm (CSV)"."""
+    """Products come from CSVs you export by hand via Shopee Affiliate's own
+    "Lấy link hàng loạt" (bulk get-link) feature and drop into input_dir --
+    not from scraping the portal, which got the account captcha-challenged.
+    See README "Nguồn sản phẩm (CSV) và hàng đợi"."""
 
-    csv_path: Path
+    input_dir: Path
     min_sales: int
 
 
@@ -91,7 +91,7 @@ def load_config(path: Path | str = DEFAULT_CONFIG_PATH) -> AppConfig:
         daily_target=raw["daily_target"],
         root_dir=root_dir,
         product_source=ProductSourceConfig(
-            csv_path=_resolve(root_dir, ps["csv_path"]),
+            input_dir=_resolve(root_dir, ps["input_dir"]),
             min_sales=ps["min_sales"],
         ),
         image_search=ImageSearchConfig(

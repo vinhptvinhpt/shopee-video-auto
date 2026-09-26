@@ -1,10 +1,14 @@
-"""SQLite-backed state: a durable, ordered queue of products imported from
-CSV exports (deduped by affiliate link, independent of whether the CSV file
-itself still exists later), plus a record of what's already been posted so
-a crashed or re-run pipeline never double-posts and never exceeds the daily
-target. Products left in the queue after a day's target is reached simply
-stay pending and are picked up on a later day -- that's the whole overflow
-mechanism, no separate "carry over" logic needed.
+"""SQLite-backed state:
+- `imported_files` tracks which CSVs (by content hash, not filename/mtime)
+  have already been scanned, so re-running the folder scan never re-reads
+  a file it already ingested.
+- `product_queue` is a durable, ordered queue of products (deduped by
+  affiliate link, independent of whether the CSV file itself still exists
+  later). Products left in the queue after a day's target is reached simply
+  stay pending and are picked up on a later day -- that's the whole
+  overflow mechanism, no separate "carry over" logic needed.
+- `posted_products` records what's already been posted so a crashed or
+  re-run pipeline never double-posts and never exceeds the daily target.
 """
 
 from __future__ import annotations
@@ -25,6 +29,13 @@ CREATE TABLE IF NOT EXISTS product_queue (
     sales_count INTEGER,
     status TEXT NOT NULL DEFAULT 'pending',
     queued_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS imported_files (
+    fingerprint TEXT PRIMARY KEY,
+    file_name TEXT NOT NULL,
+    products_added INTEGER NOT NULL,
+    imported_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS posted_products (
@@ -71,6 +82,21 @@ class StateStore:
 
     def __exit__(self, *exc: object) -> None:
         self.close()
+
+    def is_file_imported(self, fingerprint: str) -> bool:
+        row = self._conn.execute(
+            "SELECT 1 FROM imported_files WHERE fingerprint = ?", (fingerprint,)
+        ).fetchone()
+        return row is not None
+
+    def mark_file_imported(self, fingerprint: str, file_name: str, products_added: int) -> None:
+        now = dt.datetime.now(dt.timezone.utc).isoformat()
+        self._conn.execute(
+            "INSERT INTO imported_files (fingerprint, file_name, products_added, imported_at) "
+            "VALUES (?, ?, ?, ?)",
+            (fingerprint, file_name, products_added, now),
+        )
+        self._conn.commit()
 
     def enqueue_products(self, products: list[Product]) -> tuple[int, int]:
         """Add newly-imported products to the durable queue. A product

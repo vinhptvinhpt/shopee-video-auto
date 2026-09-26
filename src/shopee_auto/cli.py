@@ -32,21 +32,28 @@ def main(ctx: click.Context, config_path: Path) -> None:
 @main.command("import-csv")
 @click.pass_obj
 def import_csv(cfg) -> None:
-    """Read the configured CSV and add new products to the durable queue
-    (dedup against anything already queued/posted before)."""
+    """Scan product_source.input_dir for CSV files not yet imported and add
+    their products to the durable queue (dedup against anything already
+    queued/posted before). run-daily/run-once already do this automatically
+    -- use this command to check what a newly-dropped file did, on its own."""
     pipeline = Pipeline(cfg)
     try:
-        added, duplicates = pipeline.import_csv()
+        files, added, duplicates = pipeline.import_new_csvs()
     finally:
         pipeline.close()
-    click.echo(f"Đã nạp {added} sản phẩm mới vào hàng đợi ({duplicates} trùng/đã có, bỏ qua).")
+    if files == 0:
+        click.echo("Không có file CSV mới trong thư mục input_dir.")
+    else:
+        click.echo(
+            f"Đã quét {files} file mới: nạp {added} sản phẩm ({duplicates} trùng/đã có, bỏ qua)."
+        )
 
 
 @main.command()
 @click.pass_obj
 def run_daily(cfg) -> None:
-    """Post up to `daily_target` videos, pulling from the queue (see
-    import-csv)."""
+    """Scan input_dir for new CSVs, then post up to `daily_target` videos
+    pulling from the queue."""
     pipeline = Pipeline(cfg)
     try:
         results = pipeline.run_daily()
@@ -104,23 +111,24 @@ def check_setup(cfg) -> None:
         click.echo(f"[FAIL] yt-dlp: {exc}")
 
     try:
+        from shopee_auto import product_source
         from shopee_auto.state import StateStore
 
         with StateStore(cfg.state.db_path) as s:
             pending = s.count_pending_queue()
-        csv_exists = cfg.product_source.csv_path.exists()
+        csv_files = product_source.list_csv_files(cfg.product_source.input_dir)
         if pending > 0:
             click.echo(f"[OK] Hàng đợi còn {pending} sản phẩm chưa đăng")
-        elif csv_exists:
+        elif csv_files:
             click.echo(
-                f"[OK] Hàng đợi rỗng nhưng thấy file CSV tại {cfg.product_source.csv_path} "
-                "— chạy `import-csv` trước khi run-daily"
+                f"[OK] Hàng đợi rỗng nhưng thấy {len(csv_files)} file CSV trong "
+                f"{cfg.product_source.input_dir} — run-daily sẽ tự quét và nạp"
             )
         else:
             ok = False
             click.echo(
-                f"[FAIL] Hàng đợi rỗng và không thấy file CSV tại {cfg.product_source.csv_path} "
-                "— xuất bằng \"Lấy link hàng loạt\" trên Shopee Affiliate rồi chạy `import-csv`"
+                f"[FAIL] Hàng đợi rỗng và không có file CSV nào trong {cfg.product_source.input_dir} "
+                "— thả file xuất từ \"Lấy link hàng loạt\" vào thư mục này"
             )
     except Exception as exc:  # noqa: BLE001
         ok = False

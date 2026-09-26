@@ -14,11 +14,11 @@ from __future__ import annotations
 
 import csv
 import dataclasses
+import hashlib
 import re
 import urllib.request
 from pathlib import Path
 
-from shopee_auto.config import ProductSourceConfig
 from shopee_auto.logger import get_logger
 
 log = get_logger("product_source")
@@ -39,20 +39,25 @@ class Product:
     sales_count: int | None = None
 
 
-class NoCsvFoundError(RuntimeError):
-    pass
+def list_csv_files(input_dir: Path) -> list[Path]:
+    """All *.csv files currently sitting in the watched folder, in a stable
+    order. Doesn't distinguish new vs already-imported -- that's tracked
+    separately by content hash (see file_fingerprint / StateStore)."""
+    input_dir.mkdir(parents=True, exist_ok=True)
+    return sorted(input_dir.glob("*.csv"))
 
 
-def load_products(cfg: ProductSourceConfig) -> list[Product]:
-    if not cfg.csv_path.exists():
-        raise NoCsvFoundError(
-            f"Không thấy file CSV tại {cfg.csv_path}. Xuất file mới bằng chức năng "
-            "\"Lấy link hàng loạt\" trên Shopee Affiliate rồi đặt đúng đường dẫn này."
-        )
+def file_fingerprint(path: Path) -> str:
+    """Content hash, not mtime/size -- a file copied or re-saved with a new
+    timestamp but identical rows must still be recognized as "already
+    imported" so it's never re-enqueued."""
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
+
+def load_products_from_file(path: Path, min_sales: int) -> list[Product]:
     products: list[Product] = []
     seen_links: set[str] = set()
-    with cfg.csv_path.open(encoding="utf-8-sig", newline="") as f:
+    with path.open(encoding="utf-8-sig", newline="") as f:
         for row in csv.DictReader(f):
             name = (row.get("Tên sản phẩm") or "").strip()
             link = (row.get("Link ưu đãi") or "").strip()
@@ -63,12 +68,12 @@ def load_products(cfg: ProductSourceConfig) -> list[Product]:
                 log.warning("Bỏ qua dòng trùng link trong CSV: %s", name)
                 continue
             sales = _parse_sales_count(row.get("Doanh thu") or "")
-            if cfg.min_sales and sales is not None and sales < cfg.min_sales:
+            if min_sales and sales is not None and sales < min_sales:
                 continue
             seen_links.add(link)
             products.append(Product(name=name, link=link, product_url=product_url, sales_count=sales))
 
-    log.info("Đọc %d sản phẩm đạt điều kiện từ %s", len(products), cfg.csv_path)
+    log.info("Đọc %d sản phẩm đạt điều kiện từ %s", len(products), path)
     return products
 
 
