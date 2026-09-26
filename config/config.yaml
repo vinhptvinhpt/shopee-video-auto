@@ -11,11 +11,16 @@ shopee_affiliate:
   browser_profile_dir: "./data/browser_profile"
   headless: false
   # Use your real installed Google Chrome instead of Playwright's bundled
-  # "Chrome for Testing" build. Google blocks Google-account sign-in from
-  # the bundled build; reusing your real Chrome (with a copied, already
-  # logged-in profile -- see README "Google sign-in blocked") avoids ever
-  # hitting that block. Leave null to use the bundled Chromium.
+  # "Chrome for Testing" build. Only used when cdp_endpoint below is null.
   channel: "chrome"
+  # Recommended: connect to a real Chrome window you launched and logged
+  # into by hand, instead of Playwright launching/controlling its own
+  # browser from the start. This is what actually avoids Google's
+  # "Couldn't sign you in" block -- see README "Google sign-in blocked".
+  # Set to e.g. "http://localhost:9222" once you've launched Chrome with
+  # --remote-debugging-port=9222 and logged in; leave null to fall back to
+  # launch_persistent_context above.
+  cdp_endpoint: null
   bestseller_filter:
     sort_by: "sales_volume" # matches the sort option label/value on the portal
     min_sales: 100

@@ -110,31 +110,40 @@ nhập OAuth từ trình duyệt tự động hóa (banner "Chrome is being cont
 automated test software"), nên đăng nhập lại trong đó sẽ không bao giờ
 thành công.
 
-Cách khắc phục: đừng đăng nhập lại trong Playwright, hãy **tái sử dụng
-session đã đăng nhập sẵn trên Chrome thật** của bạn.
+Cách khắc phục đúng: đừng để Playwright **tự mở và điều khiển** trình duyệt
+ngay từ đầu (đó là cái Google phát hiện được) — thay vào đó, tự tay mở một
+cửa sổ Chrome thật, tự tay đăng nhập, rồi mới cho Playwright **kết nối vào**
+cửa sổ đó sau (Chrome DevTools Protocol / CDP). Vì đăng nhập diễn ra hoàn
+toàn thủ công, Google không có gì để chặn.
 
-1. `shopee_affiliate.channel: "chrome"` trong `config.yaml` (mặc định đã bật)
-   khiến Playwright điều khiển đúng Chrome thật đã cài trên máy thay vì
-   bản Chromium test đi kèm.
-2. Đóng **toàn bộ** cửa sổ Chrome đang mở (Chrome khóa file hồ sơ khi đang
-   chạy, không copy được nếu còn cửa sổ mở).
-3. Tìm đường dẫn hồ sơ Chrome thật đang đăng nhập Shopee: mở Chrome, gõ
-   `chrome://version` vào thanh địa chỉ, xem dòng **Profile Path** — ví dụ
-   `C:\Users\<ten>\AppData\Local\Google\Chrome\User Data\Default`.
-4. Copy nội dung thư mục đó vào đúng vị trí Playwright sẽ đọc
-   (`data/browser_profile/Default/`):
+> Bản thử trước dùng cách copy thư mục hồ sơ Chrome (`channel: "chrome"` +
+> copy `Default/`) — cách đó dễ gặp lỗi "Sharing violation" vì Windows/Chrome
+> vẫn giữ khóa file `Cookies` ngay cả khi tưởng đã đóng hết cửa sổ. Dùng CDP
+> bên dưới ổn định hơn hẳn, khuyến khích dùng cách này thay thế.
+
+1. Đóng hết Chrome hiện tại (Task Manager → kiểm tra không còn tiến trình
+   `chrome.exe` nào, tắt hết nếu có — Chrome hay chạy ngầm dù đã đóng cửa
+   sổ).
+2. Mở Command Prompt, chạy (sửa đường dẫn nếu Chrome cài chỗ khác):
    ```cmd
-   mkdir data\browser_profile\Default
-   xcopy "C:\Users\<ten>\AppData\Local\Google\Chrome\User Data\Default" "data\browser_profile\Default" /E /I /H /Y
+   "C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir="C:\shopee-chrome-profile"
    ```
-5. Chạy lại bước đăng nhập ở trên — lần này trang sẽ mở ra và **đã đăng
-   nhập sẵn**, không còn phải bấm nút Google nữa.
+   Một cửa sổ Chrome **hoàn toàn bình thường** hiện ra (không có banner
+   "controlled by automated software" vì đây chưa phải Playwright điều
+   khiển). `--user-data-dir` trỏ tới thư mục mới để tách biệt, không đụng
+   vào hồ sơ Chrome bạn dùng hàng ngày.
+3. Trong cửa sổ đó, vào `https://affiliate.shopee.vn/offer/product_pool`,
+   đăng nhập Shopee (kể cả qua Google) như bình thường. **Giữ nguyên cửa sổ
+   này mở**, đừng tắt.
+4. Sửa `config/config.yaml`: đặt `shopee_affiliate.cdp_endpoint: "http://localhost:9222"`.
+5. Chạy lại pipeline (`check-setup`, `run-once`...) — nó sẽ tự kết nối vào
+   đúng cửa sổ Chrome bạn vừa mở ở bước 2, dùng session đã đăng nhập sẵn,
+   không mở cửa sổ mới nào nữa.
 
-Lưu ý: thao tác này copy toàn bộ hồ sơ Chrome (cookie mọi trang web, mật
-khẩu đã lưu, autofill...), không chỉ riêng Shopee. Nếu muốn tách biệt, tạo
-một hồ sơ Chrome phụ riêng cho việc này (Chrome hỗ trợ nhiều profile), đăng
-nhập Shopee trong hồ sơ phụ đó, rồi trỏ Bước 3-4 vào hồ sơ phụ thay vì hồ
-sơ chính bạn dùng hàng ngày.
+Lưu ý: mỗi lần muốn chạy `run-once`/`run-daily`, cửa sổ Chrome ở bước 2 phải
+đang mở sẵn (chạy lại lệnh ở bước 2 nếu bạn đã tắt máy/đóng Chrome — session
+đăng nhập vẫn còn vì nó nằm trong `C:\shopee-chrome-profile`, bạn không cần
+đăng nhập lại, chỉ cần mở lại đúng lệnh đó).
 
 ## Chạy
 

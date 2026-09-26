@@ -24,6 +24,7 @@ class ShopeeAffiliateConfig:
     browser_profile_dir: Path
     headless: bool
     channel: str | None
+    cdp_endpoint: str | None
     bestseller_filter: BestsellerFilter
     max_candidates_per_run: int
     selectors: dict[str, str]
@@ -102,6 +103,7 @@ def load_config(path: Path | str = DEFAULT_CONFIG_PATH) -> AppConfig:
             browser_profile_dir=_resolve(root_dir, sa["browser_profile_dir"]),
             headless=sa["headless"],
             channel=sa.get("channel"),
+            cdp_endpoint=sa.get("cdp_endpoint"),
             bestseller_filter=BestsellerFilter(**sa["bestseller_filter"]),
             max_candidates_per_run=sa["max_candidates_per_run"],
             selectors=sa["selectors"],

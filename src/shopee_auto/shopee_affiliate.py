@@ -38,10 +38,22 @@ class ShopeeAffiliateClient:
         self._cfg = cfg
         self._playwright = None
         self._context: BrowserContext | None = None
+        self._owns_context = True
 
     def __enter__(self) -> "ShopeeAffiliateClient":
-        self._cfg.browser_profile_dir.mkdir(parents=True, exist_ok=True)
         self._playwright = sync_playwright().start()
+
+        if self._cfg.cdp_endpoint:
+            # Attach to a real Chrome window you launched and logged into by
+            # hand (see README "Google sign-in blocked"). This never triggers
+            # Google's automation block, since Playwright only connects to it
+            # after the fact instead of launching/controlling it from the start.
+            browser = self._playwright.chromium.connect_over_cdp(self._cfg.cdp_endpoint)
+            self._context = browser.contexts[0] if browser.contexts else browser.new_context()
+            self._owns_context = False
+            return self
+
+        self._cfg.browser_profile_dir.mkdir(parents=True, exist_ok=True)
         launch_kwargs: dict = {"headless": self._cfg.headless}
         if self._cfg.channel:
             launch_kwargs["channel"] = self._cfg.channel
@@ -51,8 +63,9 @@ class ShopeeAffiliateClient:
         return self
 
     def __exit__(self, *exc: object) -> None:
-        if self._context:
+        if self._context and self._owns_context:
             self._context.close()
+        # else: it's your real Chrome window (connected via CDP) -- leave it running.
         if self._playwright:
             self._playwright.stop()
 
