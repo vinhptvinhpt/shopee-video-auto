@@ -111,3 +111,7 @@ def _print_summary(results) -> None:
         click.echo(f"[{r.status.upper():8}] {r.product.name} — {r.detail}")
     success = sum(1 for r in results if r.status == "success")
     click.echo(f"\nTổng kết: {success}/{len(results)} video đăng thành công.")
+
+
+if __name__ == "__main__":
+    main()
