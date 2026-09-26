@@ -51,6 +51,7 @@ def load_products(cfg: ProductSourceConfig) -> list[Product]:
         )
 
     products: list[Product] = []
+    seen_links: set[str] = set()
     with cfg.csv_path.open(encoding="utf-8-sig", newline="") as f:
         for row in csv.DictReader(f):
             name = (row.get("Tên sản phẩm") or "").strip()
@@ -58,13 +59,17 @@ def load_products(cfg: ProductSourceConfig) -> list[Product]:
             product_url = (row.get("Link sản phẩm") or "").strip()
             if not name or not link:
                 continue
+            if link in seen_links:
+                log.warning("Bỏ qua dòng trùng link trong CSV: %s", name)
+                continue
             sales = _parse_sales_count(row.get("Doanh thu") or "")
             if cfg.min_sales and sales is not None and sales < cfg.min_sales:
                 continue
+            seen_links.add(link)
             products.append(Product(name=name, link=link, product_url=product_url, sales_count=sales))
 
     log.info("Đọc %d sản phẩm đạt điều kiện từ %s", len(products), cfg.csv_path)
-    return products[: cfg.max_candidates_per_run]
+    return products
 
 
 def fetch_thumbnail_url(product_url: str, timeout: float = 15) -> str:

@@ -1,9 +1,11 @@
 # shopee-video-auto
 
-Tự động hóa quy trình: đọc danh sách sản phẩm bán chạy (xuất từ Shopee
-Affiliate) → tìm clip TikTok đang viral trùng ảnh sản phẩm → tải clip (không
-watermark) → đăng lên Shopee Video kèm gắn giỏ hàng → xác nhận bài đăng
-thành công. Mục tiêu mặc định: 10 video/ngày.
+Tự động hóa quy trình: nhập danh sách sản phẩm bán chạy (xuất từ Shopee
+Affiliate) vào một hàng đợi bền vững → tìm clip TikTok đang viral trùng ảnh
+sản phẩm → tải clip (không watermark) → đăng lên Shopee Video kèm gắn giỏ
+hàng → xác nhận bài đăng thành công. Mục tiêu mặc định: 5 video/ngày, đảm
+bảo không trùng lặp; sản phẩm dư trong hàng đợi tự động chuyển sang ngày
+hôm sau.
 
 ## ⚠️ Rủi ro cần biết trước khi dùng
 
@@ -28,8 +30,8 @@ nhưng chạy vài lần liên tục thì Shopee bắt nhập captcha (hệ th�
 phát hiện được, dù đã kết nối qua Chrome DevTools Protocol vào cửa sổ Chrome
 thật). Vì vậy bước này **không tự động hóa** nữa: bạn tự dùng chức năng có
 sẵn **"Lấy link hàng loạt"** trên Shopee Affiliate (thao tác người thật, xuất
-CSV), pipeline chỉ đọc file CSV đó — không còn Playwright/đăng nhập/CDP nào
-cho phần Shopee Affiliate cả.
+CSV), rồi nạp file đó vào hàng đợi bằng lệnh `import-csv` — không còn
+Playwright/đăng nhập/CDP nào cho phần Shopee Affiliate cả.
 
 ## Kiến trúc
 
@@ -37,13 +39,13 @@ cho phần Shopee Affiliate cả.
 config/config.yaml              # mọi tham số + selector đều nằm ở đây
 src/shopee_auto/
   config.py                     # load config.yaml -> dataclass
-  state.py                      # SQLite: chống đăng trùng sản phẩm, đếm số video/ngày
+  state.py                      # SQLite: hàng đợi sản phẩm bền vững + chống đăng trùng + đếm số video/ngày
   product_source.py             # đọc CSV "Lấy link hàng loạt", lấy thumbnail qua HTTP thuần (og:image)
   image_search.py               # Playwright: reverse image search qua Google Lens
   tiktok.py                     # yt-dlp: đo lượt xem, chọn video, tải về (đã không watermark)
   phone_control.py              # uiautomator2/ADB: điều khiển app Shopee trên điện thoại thật
   pipeline.py                   # nối toàn bộ pipeline, cô lập lỗi theo từng sản phẩm
-  cli.py                        # `shopee-auto run-daily|run-once|check-setup`
+  cli.py                        # `shopee-auto import-csv|run-daily|run-once|check-setup`
 tests/test_state.py             # unit test cho state.py (phần duy nhất test được không cần thiết bị thật)
 ```
 
@@ -68,22 +70,38 @@ trong môi trường sandbox này. Phần dưới đây là hướng dẫn cài 
      ```
    - Đăng nhập sẵn Shopee trên app điện thoại (thủ công, một lần).
 
-## Nguồn sản phẩm (CSV)
+## Nguồn sản phẩm (CSV) và hàng đợi
 
-Mỗi lần muốn lấy danh sách sản phẩm mới:
+Nhập sản phẩm và đăng bài hàng ngày là hai việc tách biệt:
 
 1. Vào Shopee Affiliate (`https://affiliate.shopee.vn/offer/product_offer`),
-   tab **"Bán chạy nhất"**.
-2. Chọn các sản phẩm muốn đăng → dùng chức năng **"Lấy link hàng loạt"** →
-   xuất file CSV (các cột: `Tên sản phẩm`, `Doanh thu`, `Link sản phẩm`,
-   `Link ưu đãi`, ...).
+   tab **"Bán chạy nhất"**, tự chọn sản phẩm muốn affiliate theo tiêu chí
+   của bạn.
+2. Dùng chức năng **"Lấy link hàng loạt"** → xuất file CSV (các cột:
+   `Tên sản phẩm`, `Doanh thu`, `Link sản phẩm`, `Link ưu đãi`, ...). File
+   có thể chứa rất nhiều dòng, có thể trùng hoặc không — không sao cả.
 3. Di chuyển/đổi tên file CSV vừa tải về thành đúng đường dẫn cấu hình ở
    `product_source.csv_path` trong `config/config.yaml` (mặc định
    `./data/products_export.csv`).
+4. Nạp vào hàng đợi:
+   ```bash
+   shopee-auto import-csv
+   ```
+   Lệnh này đọc CSV, tự bỏ qua dòng trùng link **trong chính file** lẫn
+   những sản phẩm **đã có trong hàng đợi hoặc đã đăng từ trước** (kể cả từ
+   lần import khác, file khác), rồi thêm phần còn lại vào hàng đợi bền vững
+   trong `data/state.db`. In ra số lượng đã nạp mới / bị bỏ qua vì trùng.
 
-Pipeline đọc file này mỗi lần chạy — không tự động đăng nhập/scrape Shopee
-Affiliate portal. `product_source.min_sales` lọc theo cột "Doanh thu" (dạng
-`"300k+"`, `"1tr+"` được parse thành số).
+`run-daily`/`run-once` **không đọc CSV** — chỉ rút tối đa `daily_target`
+sản phẩm **đang chờ** (`pending`) ra khỏi hàng đợi theo đúng thứ tự đã nạp
+(vào trước xử lý trước). Vì vậy:
+- Bạn có thể `import-csv` bất cứ lúc nào (kể cả nhiều file khác nhau theo
+  thời gian) mà không lo trùng lặp.
+- Nếu hàng đợi có nhiều hơn `daily_target` sản phẩm, phần dư **tự động**
+  chờ đến lượt chạy hôm sau — không cần logic "carry over" nào thêm, vì nó
+  đơn giản là vẫn còn `pending` trong DB.
+- Xóa hay thay file CSV sau khi `import-csv` không ảnh hưởng gì — hàng đợi
+  đã độc lập với file.
 
 Thumbnail sản phẩm được lấy bằng cách gọi HTTP GET thẳng vào "Link sản phẩm"
 (trang công khai, không cần đăng nhập) và đọc thẻ `og:image` — giống cách
@@ -120,8 +138,8 @@ Bạn cần tự lấy selector thật của mình rồi điền vào `config/co
   ```
 
 Chạy `shopee-auto check-setup` để kiểm tra Playwright/ADB/yt-dlp hoạt động,
-file CSV có tồn tại, và selector điện thoại đã điền chưa — trước khi chạy
-`run-once`.
+hàng đợi/CSV còn sản phẩm hay không, và selector điện thoại đã điền chưa —
+trước khi chạy `run-once`.
 
 ## Chạy
 
@@ -129,11 +147,14 @@ file CSV có tồn tại, và selector điện thoại đã điền chưa — tr
 # kiểm tra môi trường trước
 shopee-auto check-setup
 
+# nạp sản phẩm mới từ CSV vào hàng đợi (chạy lại bất cứ khi nào có CSV mới)
+shopee-auto import-csv
+
 # đăng thử đúng 1 video để kiểm tra toàn bộ luồng
 shopee-auto run-once
 
-# chạy đủ chỉ tiêu trong ngày (mặc định 10 video, dừng sớm nếu đã đủ
-# hoặc hết sản phẩm phù hợp)
+# chạy đủ chỉ tiêu trong ngày (mặc định 5 video, dừng sớm nếu đã đủ
+# hoặc hàng đợi hết sản phẩm)
 shopee-auto run-daily
 ```
 
@@ -142,21 +163,26 @@ Scheduler (Windows), ví dụ cron 8h sáng mỗi ngày:
 ```
 0 8 * * * cd /path/to/shopee-video-auto && /usr/bin/env PATH=$PATH shopee-auto run-daily >> data/logs/cron.log 2>&1
 ```
-Vì nguồn sản phẩm là file CSV bạn tự xuất, nhớ cập nhật file này trước mỗi
-lần chạy (hoặc trước khi cron chạy) để có sản phẩm mới.
+`import-csv` không cần chạy theo lịch — chỉ chạy khi bạn có CSV mới muốn
+nạp thêm; `run-daily` tự rút từ hàng đợi đã có sẵn.
 
 ## Chống trùng lặp & giới hạn hàng ngày
 
-`data/state.db` (SQLite) ghi lại mọi sản phẩm đã đăng thành công — pipeline
-sẽ không bao giờ chọn lại cùng một sản phẩm (dựa trên "Link ưu đãi"), và
-`count_posted_today()` đảm bảo không vượt `daily_target` dù bạn chạy
-`run-daily` nhiều lần trong cùng một ngày (ví dụ sau khi sửa lỗi và chạy
-lại).
+Hai lớp bảo vệ độc lập trong `data/state.db` (SQLite):
+- **Hàng đợi (`product_queue`)**: mỗi sản phẩm (theo "Link ưu đãi") chỉ vào
+  hàng đợi đúng 1 lần dù bạn `import-csv` bao nhiêu file chồng lặp nhau,
+  và mỗi ngày `run-daily` rút đúng `daily_target` sản phẩm **chưa xử lý**
+  theo thứ tự vào trước, đảm bảo 1 sản phẩm không bao giờ được chọn 2 lần.
+- **Lịch sử đăng bài (`posted_products`)**: `count_posted_today()` đảm bảo
+  không vượt `daily_target` dù bạn chạy `run-daily` nhiều lần trong cùng
+  một ngày (ví dụ sau khi sửa lỗi và chạy lại).
 
 ## Xử lý sự cố thường gặp
 
-- **`NoCsvFoundError`**: chưa xuất/đặt đúng file CSV — xem mục "Nguồn sản
-  phẩm (CSV)".
+- **`NoCsvFoundError`**: chưa xuất/đặt đúng file CSV cho `import-csv` — xem
+  mục "Nguồn sản phẩm (CSV) và hàng đợi".
+- **Hàng đợi rỗng khi chạy `run-daily`**: chạy `shopee-auto import-csv` để
+  nạp thêm sản phẩm.
 - **`CaptchaEncounteredError`**: Google Lens phát hiện traffic bất thường.
   Pipeline tự bỏ qua sản phẩm đó và sang sản phẩm tiếp theo; nếu xảy ra liên
   tục, giãn `tiktok.request_delay_seconds` hoặc tạm dừng vài giờ.

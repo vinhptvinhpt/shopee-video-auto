@@ -29,10 +29,24 @@ def main(ctx: click.Context, config_path: Path) -> None:
     ctx.obj = cfg
 
 
+@main.command("import-csv")
+@click.pass_obj
+def import_csv(cfg) -> None:
+    """Read the configured CSV and add new products to the durable queue
+    (dedup against anything already queued/posted before)."""
+    pipeline = Pipeline(cfg)
+    try:
+        added, duplicates = pipeline.import_csv()
+    finally:
+        pipeline.close()
+    click.echo(f"Đã nạp {added} sản phẩm mới vào hàng đợi ({duplicates} trùng/đã có, bỏ qua).")
+
+
 @main.command()
 @click.pass_obj
 def run_daily(cfg) -> None:
-    """Post up to `daily_target` videos, skipping products already posted."""
+    """Post up to `daily_target` videos, pulling from the queue (see
+    import-csv)."""
     pipeline = Pipeline(cfg)
     try:
         results = pipeline.run_daily()
@@ -89,12 +103,28 @@ def check_setup(cfg) -> None:
         ok = False
         click.echo(f"[FAIL] yt-dlp: {exc}")
 
-    if not cfg.product_source.csv_path.exists():
+    try:
+        from shopee_auto.state import StateStore
+
+        with StateStore(cfg.state.db_path) as s:
+            pending = s.count_pending_queue()
+        csv_exists = cfg.product_source.csv_path.exists()
+        if pending > 0:
+            click.echo(f"[OK] Hàng đợi còn {pending} sản phẩm chưa đăng")
+        elif csv_exists:
+            click.echo(
+                f"[OK] Hàng đợi rỗng nhưng thấy file CSV tại {cfg.product_source.csv_path} "
+                "— chạy `import-csv` trước khi run-daily"
+            )
+        else:
+            ok = False
+            click.echo(
+                f"[FAIL] Hàng đợi rỗng và không thấy file CSV tại {cfg.product_source.csv_path} "
+                "— xuất bằng \"Lấy link hàng loạt\" trên Shopee Affiliate rồi chạy `import-csv`"
+            )
+    except Exception as exc:  # noqa: BLE001
         ok = False
-        click.echo(
-            f"[FAIL] Không thấy file CSV tại {cfg.product_source.csv_path} "
-            "— xuất bằng \"Lấy link hàng loạt\" trên Shopee Affiliate rồi đặt đúng đường dẫn"
-        )
+        click.echo(f"[FAIL] Không đọc được state DB: {exc}")
 
     if not any(cfg.phone.ui.values()):
         ok = False

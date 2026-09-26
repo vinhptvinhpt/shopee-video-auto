@@ -2,18 +2,17 @@
 # Values here are defaults you must review against your own Shopee account,
 # device, and network conditions before running unattended.
 
-daily_target: 10 # videos to publish per calendar day
+daily_target: 5 # videos to publish per calendar day
 
 # Products come from a CSV you export by hand via Shopee Affiliate's own
 # "Lấy link hàng loạt" (bulk get-link) feature -- automating that admin
 # panel with a browser got the account captcha-challenged, so there is no
-# scraping here at all. After exporting, move/rename the downloaded file to
-# csv_path below (or point csv_path at wherever you save it) before running
-# the pipeline. See README "Nguồn sản phẩm (CSV)".
+# scraping here at all. Run `shopee-auto import-csv` after exporting to load
+# new products into the durable queue (data/state.db) that run-daily pulls
+# from -- see README "Nguồn sản phẩm (CSV) và hàng đợi".
 product_source:
   csv_path: "./data/products_export.csv"
   min_sales: 100 # parsed from the CSV's "Doanh thu" column, e.g. "300k+" -> 300000
-  max_candidates_per_run: 20
 
 image_search:
   engine: "google_lens"

@@ -20,7 +20,6 @@ class ProductSourceConfig:
 
     csv_path: Path
     min_sales: int
-    max_candidates_per_run: int
 
 
 @dataclasses.dataclass
@@ -94,7 +93,6 @@ def load_config(path: Path | str = DEFAULT_CONFIG_PATH) -> AppConfig:
         product_source=ProductSourceConfig(
             csv_path=_resolve(root_dir, ps["csv_path"]),
             min_sales=ps["min_sales"],
-            max_candidates_per_run=ps["max_candidates_per_run"],
         ),
         image_search=ImageSearchConfig(
             engine=ims["engine"],

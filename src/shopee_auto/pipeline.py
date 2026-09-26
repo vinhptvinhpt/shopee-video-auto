@@ -1,8 +1,14 @@
-"""Orchestrate one full product cycle (read product from CSV -> match TikTok
-clip -> publish on Shopee -> verify) and the daily loop over the configured
-target. Every product is isolated in a try/except so one bad product
-(captcha, missing UI element, no matching clip) never aborts the rest of the
-day's run.
+"""Orchestrate one full product cycle (pull from the durable queue -> match
+TikTok clip -> publish on Shopee -> verify) and the daily loop over the
+configured target. Every product is isolated in a try/except so one bad
+product (captcha, missing UI element, no matching clip) never aborts the
+rest of the day's run.
+
+Importing a CSV (`Pipeline.import_csv`) and running the daily loop are
+deliberately separate: import once (or whenever you export a new CSV) to
+fill the queue, then run-daily just drains up to `daily_target` pending
+items off it each day -- overflow automatically waits for the next day
+since it's simply still "pending" in the queue.
 """
 
 from __future__ import annotations
@@ -36,6 +42,13 @@ class Pipeline:
     def close(self) -> None:
         self.state.close()
 
+    def import_csv(self) -> tuple[int, int]:
+        """Read the configured CSV and enqueue any products not already in
+        the queue (whether from an earlier import or an overlapping export).
+        Returns (added, duplicates)."""
+        products = product_source.load_products(self.cfg.product_source)
+        return self.state.enqueue_products(products)
+
     def run_daily(self, max_videos: int | None = None) -> list[CycleResult]:
         remaining = self.cfg.daily_target - self.state.count_posted_today()
         if max_videos is not None:
@@ -44,22 +57,19 @@ class Pipeline:
             log.info("Đã đạt chỉ tiêu %d video hôm nay, dừng.", self.cfg.daily_target)
             return []
 
-        products = product_source.load_products(self.cfg.product_source)
-        candidates = [p for p in products if not self.state.is_product_posted(p.link)]
-        log.info(
-            "%d/%d sản phẩm chưa đăng, cần đăng thêm %d video",
-            len(candidates),
-            len(products),
-            remaining,
-        )
+        candidates = self.state.get_pending_queue(remaining)
+        if not candidates:
+            log.info("Hàng đợi rỗng -- chạy `import-csv` để nạp thêm sản phẩm.")
+            return []
+        log.info("Lấy %d sản phẩm từ hàng đợi (cần đăng thêm %d video)", len(candidates), remaining)
 
         results: list[CycleResult] = []
         with GoogleLensSearch(self.cfg.image_search) as lens, PhoneController(self.cfg.phone) as phone:
             phone.check_ready()
             for product in candidates:
-                if len(results) >= remaining:
-                    break
-                results.append(self._run_one(product, lens, phone))
+                result = self._run_one(product, lens, phone)
+                self.state.mark_queue_status(product.link, result.status)
+                results.append(result)
 
         posted = sum(1 for r in results if r.status == "success")
         log.info("Hoàn tất đợt chạy: %d/%d video đăng thành công", posted, len(results))
