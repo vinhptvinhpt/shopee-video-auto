@@ -17,10 +17,10 @@ shopee_affiliate:
   # into by hand, instead of Playwright launching/controlling its own
   # browser from the start. This is what actually avoids Google's
   # "Couldn't sign you in" block -- see README "Google sign-in blocked".
-  # Set to e.g. "http://localhost:9222" once you've launched Chrome with
-  # --remote-debugging-port=9222 and logged in; leave null to fall back to
-  # launch_persistent_context above.
-  cdp_endpoint: null
+  # Set once you've launched Chrome with --remote-debugging-port=9222 and
+  # logged in (see README "Google sign-in blocked"); leave null to fall
+  # back to launch_persistent_context above.
+  cdp_endpoint: "http://localhost:9222"
   bestseller_filter:
     min_sales: 100
     category: null
