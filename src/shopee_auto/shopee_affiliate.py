@@ -1,10 +1,9 @@
 """Browse the Shopee Affiliate Center with a persistent, already-logged-in
 Playwright browser profile, and scrape the current best-selling products.
 
-The affiliate portal's markup is not something we can verify from this
-environment, so every selector is read from config (`shopee_affiliate.selectors`)
-instead of being hardcoded. See README "Calibrating selectors" for how to
-fill them in with Playwright codegen against your own account.
+Selectors are read from config (`shopee_affiliate.selectors`) rather than
+hardcoded, since Shopee's markup can only be confirmed against a real,
+logged-in account. See README "Calibrating selectors".
 """
 
 from __future__ import annotations
@@ -86,10 +85,10 @@ class ShopeeAffiliateClient:
             page.close()
 
     def fetch_bestseller_products(self) -> list[Product]:
-        """Navigate to the bestseller tab, then for each product card: open
-        its popup, click "Lấy link" -> "Sao chép Link" to reveal the real
-        affiliate link (there is no plain href to scrape here), and read the
-        name/link back out of the popup's DOM.
+        """Navigate to the bestseller tab, then for each product card: read
+        name/thumbnail/sales directly off the card, click its in-card "Lấy
+        link" button, and pull the real affiliate link out of the Ant Design
+        modal that opens (no popup/new tab involved).
         """
         nav = self._cfg.navigation
         sel = self._cfg.selectors
@@ -97,8 +96,7 @@ class ShopeeAffiliateClient:
         page = self._context.new_page()
         try:
             page.goto(self._cfg.portal_url, wait_until="networkidle")
-            page.get_by_role("link", name=nav.category_link_text).click()
-            page.get_by_text(nav.bestseller_tab_text).click()
+            page.get_by_text(nav.bestseller_tab_text, exact=True).click()
             page.wait_for_load_state("networkidle")
 
             cards = page.locator(sel["product_card"])
@@ -106,20 +104,21 @@ class ShopeeAffiliateClient:
             products: list[Product] = []
             for i in range(count):
                 card = cards.nth(i)
-                thumb = card.locator("img").first.get_attribute("src") or ""
+                name = card.locator(sel["product_name"]).inner_text().strip()
+                thumb = card.locator(sel["product_thumbnail"]).get_attribute("src") or ""
                 sales = None
                 if sel.get("sales_count"):
                     sales_text = card.locator(sel["sales_count"]).inner_text()
                     sales = _parse_sales_count(sales_text)
                 if cfg.min_sales and sales is not None and sales < cfg.min_sales:
                     continue
-
-                name, link = self._open_product_and_get_link(page, card)
-                if not link:
-                    log.warning("Bỏ qua sản phẩm không lấy được link: %s", name)
-                    continue
                 if not thumb:
                     log.warning("Bỏ qua sản phẩm thiếu thumbnail: %s", name)
+                    continue
+
+                link = self._get_affiliate_link(card)
+                if not link:
+                    log.warning("Bỏ qua sản phẩm không lấy được link: %s", name)
                     continue
                 products.append(Product(name=name, link=link, thumbnail_url=thumb, sales_count=sales))
 
@@ -128,30 +127,26 @@ class ShopeeAffiliateClient:
         finally:
             page.close()
 
-    def _open_product_and_get_link(self, page, card) -> tuple[str, str]:
+    def _get_affiliate_link(self, card) -> str:
         nav = self._cfg.navigation
         sel = self._cfg.selectors
-        with page.expect_popup() as popup_info:
-            card.click()
-        popup = popup_info.value
+        page = card.page
+        card.locator(sel["get_link_button"]).click()
         try:
-            popup.wait_for_load_state("networkidle")
-            name = popup.locator(sel["product_title_in_popup"]).inner_text().strip()
-            popup.get_by_role("button", name=nav.get_link_button_text).click()
-            popup.get_by_role("button", name=nav.copy_link_button_text).click()
-            link_el = popup.locator(sel["product_link_value"])
+            copy_btn = page.get_by_role("button", name=nav.copy_link_button_text)
+            copy_btn.wait_for(timeout=5000)
+            copy_btn.click()
+            link_el = page.locator(sel["product_link_value"])
             try:
                 link = link_el.input_value()
             except Exception:  # noqa: BLE001 - not an <input>, fall back to visible text
                 link = link_el.inner_text().strip()
-            return name, link
+            return link
         finally:
             try:
-                popup.get_by_role("button", name=nav.close_popup_button_text).click(timeout=3000)
+                page.get_by_role("button", name=nav.close_popup_button_text).click(timeout=3000)
             except Exception:  # noqa: BLE001 - best-effort cleanup, don't mask the real error
                 pass
-            if not popup.is_closed():
-                popup.close()
 
     def download_thumbnail(self, product: Product, dest_dir: Path) -> Path:
         dest_dir.mkdir(parents=True, exist_ok=True)
