@@ -17,11 +17,14 @@ product_source:
   input_dir: "./data/input_csv"
   min_sales: 100 # parsed from the CSV's "Doanh thu" column, e.g. "300k+" -> 300000
   # Shopee redirects a Playwright-launched browser to /verify/traffic/error
-  # when fetching a product page (bot check) -- set this once you've
-  # launched Chrome by hand with --remote-debugging-port=9222 so thumbnails
-  # are fetched through that real browser instead. See README "Thumbnail bị
-  # Shopee chặn (verify/traffic/error)". Leave null to use Playwright's own
-  # browser (works until/unless you hit this block).
+  # when fetching a product page, and Google silently bounces one back to
+  # its plain homepage instead of showing real Lens results -- both are the
+  # same automation-fingerprint check. Set this once you've launched Chrome
+  # by hand with --remote-debugging-port=9222 so both thumbnail fetching
+  # AND the Google Lens search go through that real browser instead. See
+  # README "Thumbnail bị Shopee chặn (verify/traffic/error)". Leave null to
+  # use Playwright's own browser for both (works until/unless you hit
+  # either block).
   cdp_endpoint: "http://localhost:9222"
 
 image_search:

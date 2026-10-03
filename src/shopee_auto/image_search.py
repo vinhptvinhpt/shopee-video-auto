@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from playwright.sync_api import BrowserContext, Playwright
+from playwright.sync_api import Browser, Playwright
 
 from shopee_auto.config import ImageSearchConfig
 from shopee_auto.logger import get_logger
@@ -32,21 +32,44 @@ class GoogleLensSearch:
     """Takes an already-started Playwright driver (see pipeline.py) rather
     than starting its own -- Playwright's sync API only tolerates one
     sync_playwright() driver per thread, and prepare_videos also needs one
-    for ThumbnailFetcher in the same thread."""
+    for ThumbnailFetcher in the same thread.
 
-    def __init__(self, playwright: Playwright, cfg: ImageSearchConfig, debug_dir: Path | None = None):
+    A Playwright-*launched* Chromium gets silently bounced by Google: the
+    goto()/upload still "succeeds" (no captcha text, no error), but the
+    page you land on is the plain google.com homepage instead of a Lens
+    results page -- same automation fingerprint check as the Shopee
+    /verify/traffic/error block elsewhere in this project, just with a
+    quieter failure mode. cdp_endpoint, when set, attaches to the same
+    real, manually-launched Chrome window used for thumbnails instead of
+    launching a separate flagged browser."""
+
+    def __init__(
+        self,
+        playwright: Playwright,
+        cfg: ImageSearchConfig,
+        debug_dir: Path | None = None,
+        cdp_endpoint: str | None = None,
+    ):
         self._playwright = playwright
         self._cfg = cfg
         self._debug_dir = debug_dir
-        self._context: BrowserContext | None = None
+        self._cdp_endpoint = cdp_endpoint
+        self._browser: Browser | None = None
+        self._owns_browser = True
 
     def __enter__(self) -> "GoogleLensSearch":
-        self._context = self._playwright.chromium.launch(headless=self._cfg.headless).new_context()
+        if self._cdp_endpoint:
+            self._browser = self._playwright.chromium.connect_over_cdp(self._cdp_endpoint)
+            self._owns_browser = False
+        else:
+            self._browser = self._playwright.chromium.launch(headless=self._cfg.headless)
+            self._owns_browser = True
         return self
 
     def __exit__(self, *exc: object) -> None:
-        if self._context:
-            self._context.close()
+        if self._browser and self._owns_browser:
+            self._browser.close()
+        # else: it's your real Chrome window (connected via CDP) -- leave it running.
 
     def search_by_image(self, image_path: Path) -> list[str]:
         sel = self._cfg.selectors
@@ -59,7 +82,7 @@ class GoogleLensSearch:
         # would almost always discard the handful of TikTok links before
         # they're even checked.
         selector = sel.get("result_link") or "a[href]"
-        page = self._context.new_page()
+        page = self._browser.new_page()
         try:
             page.goto(self._cfg.search_url, wait_until="networkidle")
 
