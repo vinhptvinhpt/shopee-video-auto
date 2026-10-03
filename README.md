@@ -40,7 +40,7 @@ config/config.yaml              # mọi tham số + selector đều nằm ở đ
 src/shopee_auto/
   config.py                     # load config.yaml -> dataclass
   state.py                      # SQLite: hàng đợi sản phẩm bền vững (pending -> video_ready -> posted)
-  product_source.py             # đọc CSV "Lấy link hàng loạt", lấy thumbnail qua HTTP thuần (og:image)
+  product_source.py             # đọc CSV "Lấy link hàng loạt"; lấy thumbnail bằng Playwright (trang SPA client-render)
   image_search.py               # Playwright: reverse image search qua Google Lens
   tiktok.py                     # yt-dlp: đo lượt xem, chọn video, tải về (đã không watermark)
   phone_control.py              # uiautomator2/ADB: điều khiển app Shopee trên điện thoại thật
@@ -106,9 +106,11 @@ Cơ chế hàng đợi đảm bảo:
 - Xóa file CSV khỏi thư mục sau khi đã quét không ảnh hưởng gì — hàng đợi
   đã độc lập với file.
 
-Thumbnail sản phẩm được lấy bằng cách gọi HTTP GET thẳng vào "Link sản phẩm"
-(trang công khai, không cần đăng nhập) và đọc thẻ `og:image` — giống cách
-mọi bot xem trước link (Facebook, Slack...) vẫn làm, rủi ro bị chặn rất thấp.
+Thumbnail sản phẩm được lấy bằng cách mở "Link sản phẩm" (trang công khai,
+không cần đăng nhập) bằng trình duyệt headless (Playwright) và đọc ảnh ra
+từ DOM sau khi trang render xong — gọi HTTP GET thuần không đủ vì trang sản
+phẩm Shopee là SPA, ảnh chỉ xuất hiện sau khi JavaScript chạy, không có
+trong HTML thô trả về ban đầu.
 
 ## Calibrating selectors (bắt buộc trước khi chạy thật)
 

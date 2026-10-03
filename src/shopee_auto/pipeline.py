@@ -94,20 +94,22 @@ class Pipeline:
         log.info("Chuẩn bị video cho %d sản phẩm", len(candidates))
 
         results: list[PrepareResult] = []
-        with GoogleLensSearch(self.cfg.image_search) as lens:
+        with product_source.ThumbnailFetcher() as thumbs, GoogleLensSearch(self.cfg.image_search) as lens:
             for product in candidates:
-                results.append(self._prepare_one(product, lens))
+                results.append(self._prepare_one(product, thumbs, lens))
 
         ready = sum(1 for r in results if r.status == "ready")
         log.info("Hoàn tất chuẩn bị: %d/%d sản phẩm có video sẵn sàng", ready, len(results))
         return results
 
-    def _prepare_one(self, product: Product, lens: GoogleLensSearch) -> PrepareResult:
+    def _prepare_one(
+        self, product: Product, thumbs: product_source.ThumbnailFetcher, lens: GoogleLensSearch
+    ) -> PrepareResult:
         log.info("=== Chuẩn bị video cho: %s ===", product.name)
         self.state.mark_preparing(product.link)
         try:
             thumb_path = product_source.download_thumbnail(
-                product, self.cfg.tiktok.download_dir / "thumbnails"
+                product, self.cfg.tiktok.download_dir / "thumbnails", thumbs
             )
             self.state.log_stage(product.link, "thumbnail", "success")
 

@@ -1,13 +1,16 @@
 """Product source: read the CSV you export by hand from Shopee Affiliate's
 "Lấy link hàng loạt" (bulk get-link) feature, instead of automating the
 portal's UI -- clicking through many "Lấy link" modals in a row got the
-account captcha-challenged. This file has no dependency on Playwright or a
-logged-in session at all.
+account captcha-challenged.
 
-Thumbnails aren't in that CSV, so we fetch them by plain HTTP GET on the
-product's public page (the `og:image` meta tag Shopee renders server-side
-for link previews) -- an ordinary, unauthenticated request, the same kind
-any chat app's link-preview bot makes.
+Thumbnails aren't in that CSV. A plain HTTP GET on the product's public
+page doesn't work either -- confirmed against a real product page: Shopee
+serves a client-rendered SPA shell (160KB+ of app bootstrap HTML) with no
+`og:image` or any other image meta tag anywhere in it; the image only
+exists in the DOM after the page's JS runs. So ThumbnailFetcher renders
+the page with a headless browser (same Playwright already used for the
+Google Lens step) and reads the image back out of the DOM, same as a human
+browser would see it.
 """
 
 from __future__ import annotations
@@ -19,6 +22,8 @@ import re
 import urllib.request
 from pathlib import Path
 
+from playwright.sync_api import Browser, sync_playwright
+
 from shopee_auto.logger import get_logger
 
 log = get_logger("product_source")
@@ -27,11 +32,6 @@ _USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 )
-_META_TAG_RE = re.compile(r"<meta\b([^>]+)>", re.I)
-_ATTR_RE = re.compile(r'([\w:-]+)\s*=\s*"([^"]*)"|([\w:-]+)\s*=\s*\'([^\']*)\'', re.I)
-# Checked in this order -- og:image is standard, but some pages only carry
-# the twitter/itemprop variants.
-_IMAGE_META_KEYS = ("og:image:secure_url", "og:image", "twitter:image", "image")
 
 
 @dataclasses.dataclass
@@ -81,53 +81,63 @@ def load_products_from_file(path: Path, min_sales: int) -> list[Product]:
     return products
 
 
-def _extract_meta_image(html: str) -> str:
-    """Pull an image URL out of the page's <meta> tags regardless of
-    attribute order (some pages emit content="..." before property="...",
-    which a property-then-content regex silently misses)."""
-    candidates: dict[str, str] = {}
-    for tag_match in _META_TAG_RE.finditer(html):
-        attrs: dict[str, str] = {}
-        for m in _ATTR_RE.finditer(tag_match.group(1)):
-            key = (m.group(1) or m.group(3)).lower()
-            value = m.group(2) if m.group(1) else m.group(4)
-            attrs[key] = value
-        key = (attrs.get("property") or attrs.get("name") or attrs.get("itemprop") or "").lower()
-        if key and attrs.get("content"):
-            candidates[key] = attrs["content"]
-    for key in _IMAGE_META_KEYS:
-        if candidates.get(key):
-            return candidates[key]
-    return ""
+class ThumbnailFetcher:
+    """Open once per batch (like GoogleLensSearch) and reuse across every
+    product in the run, instead of launching a fresh browser per item."""
+
+    def __init__(self, headless: bool = True):
+        self._headless = headless
+        self._playwright = None
+        self._browser: Browser | None = None
+
+    def __enter__(self) -> "ThumbnailFetcher":
+        self._playwright = sync_playwright().start()
+        self._browser = self._playwright.chromium.launch(headless=self._headless)
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        if self._browser:
+            self._browser.close()
+        if self._playwright:
+            self._playwright.stop()
+
+    def fetch_url(self, product_url: str, timeout: float = 20) -> str:
+        page = self._browser.new_page()
+        try:
+            page.goto(product_url, wait_until="domcontentloaded", timeout=timeout * 1000)
+            try:
+                page.wait_for_selector('meta[property="og:image"]', timeout=timeout * 1000, state="attached")
+            except Exception:  # noqa: BLE001 - fall through to the <img> fallback below
+                pass
+
+            meta = page.locator('meta[property="og:image"]')
+            if meta.count() > 0:
+                content = meta.first.get_attribute("content")
+                if content:
+                    return content
+
+            img = page.locator("img[src*='susercontent.com']").first
+            if img.count() > 0:
+                src = img.get_attribute("src")
+                if src:
+                    return src
+
+            log.warning("Không tìm thấy ảnh sản phẩm trên trang (sau khi render) cho %s", product_url)
+            return ""
+        finally:
+            page.close()
 
 
-def fetch_thumbnail_url(product_url: str, timeout: float = 15) -> str:
-    request = urllib.request.Request(
-        product_url, headers={"User-Agent": _USER_AGENT, "Accept-Language": "vi-VN,vi;q=0.9,en;q=0.8"}
-    )
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        status = response.status
-        html = response.read().decode("utf-8", errors="ignore")
-    image = _extract_meta_image(html)
-    if not image:
-        log.warning(
-            "Không tìm thấy ảnh trong <meta> của %s (HTTP %s, HTML dài %d ký tự). Đoạn đầu trang: %r",
-            product_url,
-            status,
-            len(html),
-            html[:500],
-        )
-    return image
-
-
-def download_thumbnail(product: Product, dest_dir: Path, timeout: float = 15) -> Path:
+def download_thumbnail(
+    product: Product, dest_dir: Path, fetcher: ThumbnailFetcher, timeout: float = 20
+) -> Path:
     dest_dir.mkdir(parents=True, exist_ok=True)
     safe_name = re.sub(r"[^a-zA-Z0-9_-]+", "_", product.name)[:60]
     dest_path = dest_dir / f"{safe_name}.jpg"
 
-    thumbnail_url = product.thumbnail_url or fetch_thumbnail_url(product.product_url, timeout=timeout)
+    thumbnail_url = product.thumbnail_url or fetcher.fetch_url(product.product_url, timeout=timeout)
     if not thumbnail_url:
-        raise RuntimeError(f"Không tìm thấy ảnh og:image cho {product.product_url}")
+        raise RuntimeError(f"Không tìm thấy ảnh sản phẩm cho {product.product_url}")
 
     request = urllib.request.Request(thumbnail_url, headers={"User-Agent": _USER_AGENT})
     with urllib.request.urlopen(request, timeout=timeout) as response:
