@@ -50,10 +50,45 @@ def import_csv(cfg) -> None:
 
 
 @main.command()
+@click.option("--limit", type=int, default=None, help="Chỉ chuẩn bị tối đa N sản phẩm (mặc định: hết hàng đợi)")
+@click.pass_obj
+def prepare(cfg, limit: int | None) -> None:
+    """Giai đoạn 1: quét CSV mới, tìm clip TikTok khớp ảnh và tải về cho
+    từng sản phẩm đang chờ -- không đụng tới điện thoại."""
+    pipeline = Pipeline(cfg)
+    try:
+        results = pipeline.prepare_videos(limit=limit)
+    finally:
+        pipeline.close()
+    if not results:
+        click.echo("Không có sản phẩm nào để chuẩn bị.")
+        return
+    for r in results:
+        click.echo(f"[{r.status.upper():6}] {r.product.name} — {r.detail}")
+    ready = sum(1 for r in results if r.status == "ready")
+    click.echo(f"\nTổng kết: {ready}/{len(results)} video đã sẵn sàng để đăng.")
+
+
+@main.command()
+@click.option("--limit", type=int, default=None, help="Chỉ đăng tối đa N video (mặc định: phần còn lại của daily_target)")
+@click.pass_obj
+def post(cfg, limit: int | None) -> None:
+    """Giai đoạn 2: đăng các video đã chuẩn bị sẵn lên điện thoại, gắn giỏ
+    hàng, xác nhận -- không tìm/tải clip mới."""
+    pipeline = Pipeline(cfg)
+    try:
+        results = pipeline.post_ready(max_videos=limit)
+    finally:
+        pipeline.close()
+    _print_summary(results)
+
+
+@main.command()
 @click.pass_obj
 def run_daily(cfg) -> None:
-    """Scan input_dir for new CSVs, then post up to `daily_target` videos
-    pulling from the queue."""
+    """Chạy cả 2 giai đoạn liên tiếp (dùng cho cron/chạy không giám sát):
+    quét input_dir cho CSV mới, chuẩn bị video, rồi đăng tối đa
+    `daily_target` video."""
     pipeline = Pipeline(cfg)
     try:
         results = pipeline.run_daily()
@@ -79,69 +114,30 @@ def run_once(cfg) -> None:
 def check_setup(cfg) -> None:
     """Verify Playwright, ADB/uiautomator2, and yt-dlp are all reachable
     before you rely on the unattended daily loop."""
-    ok = True
+    from shopee_auto.checks import run_checks
 
-    try:
-        from playwright.sync_api import sync_playwright
+    results = run_checks(cfg)
+    for r in results:
+        click.echo(f"[{'OK' if r.ok else 'FAIL'}] {r.message}")
 
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            browser.close()
-        click.echo("[OK] Playwright/Chromium hoạt động")
-    except Exception as exc:  # noqa: BLE001
-        ok = False
-        click.echo(f"[FAIL] Playwright: {exc}")
-
-    try:
-        import uiautomator2 as u2
-
-        d = u2.connect(cfg.phone.adb_serial) if cfg.phone.adb_serial else u2.connect()
-        info = d.info
-        click.echo(f"[OK] Điện thoại kết nối: {info.get('productName', 'unknown')}")
-    except Exception as exc:  # noqa: BLE001
-        ok = False
-        click.echo(f"[FAIL] ADB/uiautomator2: {exc}")
-
-    try:
-        import yt_dlp  # noqa: F401
-
-        click.echo("[OK] yt-dlp import thành công")
-    except Exception as exc:  # noqa: BLE001
-        ok = False
-        click.echo(f"[FAIL] yt-dlp: {exc}")
-
-    try:
-        from shopee_auto import product_source
-        from shopee_auto.state import StateStore
-
-        with StateStore(cfg.state.db_path) as s:
-            pending = s.count_pending_queue()
-        csv_files = product_source.list_csv_files(cfg.product_source.input_dir)
-        if pending > 0:
-            click.echo(f"[OK] Hàng đợi còn {pending} sản phẩm chưa đăng")
-        elif csv_files:
-            click.echo(
-                f"[OK] Hàng đợi rỗng nhưng thấy {len(csv_files)} file CSV trong "
-                f"{cfg.product_source.input_dir} — run-daily sẽ tự quét và nạp"
-            )
-        else:
-            ok = False
-            click.echo(
-                f"[FAIL] Hàng đợi rỗng và không có file CSV nào trong {cfg.product_source.input_dir} "
-                "— thả file xuất từ \"Lấy link hàng loạt\" vào thư mục này"
-            )
-    except Exception as exc:  # noqa: BLE001
-        ok = False
-        click.echo(f"[FAIL] Không đọc được state DB: {exc}")
-
-    if not any(cfg.phone.ui.values()):
-        ok = False
-        click.echo("[FAIL] config.phone.ui chưa có selector nào được điền")
-
-    if ok:
+    if all(r.ok for r in results):
         click.echo("Tất cả kiểm tra cơ bản đều PASS. Vẫn nên chạy `run-once` trước khi bật vòng lặp hàng ngày.")
     else:
         raise SystemExit(1)
+
+
+@main.command()
+@click.option("--host", default="127.0.0.1", show_default=True)
+@click.option("--port", default=8787, show_default=True, type=int)
+@click.pass_obj
+def web(cfg, host: str, port: int) -> None:
+    """Mở dashboard điều khiển pipeline tại http://host:port (mặc định
+    http://127.0.0.1:8787) -- xem README "Dashboard"."""
+    from shopee_auto.web import create_app
+
+    app = create_app(cfg)
+    click.echo(f"Dashboard: http://{host}:{port}")
+    app.run(host=host, port=port, debug=False, threaded=True)
 
 
 def _print_summary(results) -> None:

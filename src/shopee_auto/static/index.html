@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Shopee Video Auto — Dashboard</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --panel: #ffffff;
+    --border: #e2e5ea;
+    --text: #1a1d23;
+    --muted: #6b7280;
+    --accent: #ee4d2d;
+    --accent-dark: #c93f24;
+    --ok: #16a34a;
+    --ok-bg: #ecfdf3;
+    --warn: #d97706;
+    --warn-bg: #fffaeb;
+    --err: #dc2626;
+    --err-bg: #fef2f2;
+    --info-bg: #eff6ff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.5 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 24px 20px 60px; }
+  header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; flex-wrap: wrap; gap: 12px; }
+  h1 { font-size: 20px; margin: 0; }
+  h1 small { display: block; font-size: 12px; font-weight: 400; color: var(--muted); margin-top: 2px; }
+  .btn {
+    appearance: none; border: 1px solid var(--border); background: var(--panel);
+    color: var(--text); padding: 8px 14px; border-radius: 8px; font-size: 13px;
+    cursor: pointer; font-weight: 500;
+  }
+  .btn:hover { background: #f1f2f4; }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn-primary:hover { background: var(--accent-dark); }
+  .btn-sm { padding: 4px 9px; font-size: 12px; border-radius: 6px; }
+  .btn-danger-ghost { color: var(--err); border-color: #f3c6c6; background: #fff; }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+  .card .n { font-size: 24px; font-weight: 700; }
+  .card .l { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .card.accent .n { color: var(--accent); }
+
+  .progress-row { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+  .progress-bar { flex: 1; height: 8px; background: #eee; border-radius: 99px; overflow: hidden; }
+  .progress-bar > div { height: 100%; background: var(--accent); transition: width .3s; }
+
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; margin-bottom: 20px; }
+  .panel h2 { font-size: 15px; margin: 0 0 12px; display: flex; align-items: center; justify-content: space-between; }
+  .panel h2 .sub { font-size: 12px; font-weight: 400; color: var(--muted); }
+
+  .actions { display: flex; gap: 12px; flex-wrap: wrap; }
+  .action-card {
+    flex: 1; min-width: 220px; border: 1px solid var(--border); border-radius: 10px;
+    padding: 16px; display: flex; flex-direction: column; gap: 8px;
+  }
+  .action-card h3 { margin: 0; font-size: 14px; }
+  .action-card p { margin: 0; font-size: 12px; color: var(--muted); flex: 1; }
+
+  .joblog {
+    margin-top: 14px; background: #0f1117; color: #d7dbe0; border-radius: 8px;
+    padding: 10px 12px; font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    max-height: 220px; overflow-y: auto; white-space: pre-wrap; display: none;
+  }
+  .joblog.show { display: block; }
+  .spinner {
+    display: inline-block; width: 13px; height: 13px; border: 2px solid rgba(255,255,255,.4);
+    border-top-color: #fff; border-radius: 50%; animation: spin .7s linear infinite; margin-right: 6px; vertical-align: -2px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .tabs { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
+  .tab {
+    border: 1px solid var(--border); background: #fff; padding: 5px 11px; border-radius: 999px;
+    font-size: 12px; cursor: pointer; color: var(--muted);
+  }
+  .tab.active { background: var(--text); color: #fff; border-color: var(--text); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .03em; }
+  td.name { max-width: 320px; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+  .badge.pending { background: #f1f2f4; color: #555; }
+  .badge.video_ready { background: var(--info-bg); color: #2563eb; }
+  .badge.posted { background: var(--ok-bg); color: var(--ok); }
+  .badge.prepare_failed, .badge.post_failed { background: var(--err-bg); color: var(--err); }
+  .badge.skipped { background: var(--warn-bg); color: var(--warn); }
+  .empty { color: var(--muted); font-size: 13px; padding: 10px 0; }
+
+  .config-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px 20px; font-size: 13px; }
+  .config-grid dt { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .03em; }
+  .config-grid dd { margin: 2px 0 10px; }
+
+  .check-list { list-style: none; margin: 0; padding: 0; font-size: 13px; }
+  .check-list li { padding: 5px 0; display: flex; gap: 8px; align-items: baseline; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; margin-top: 4px; }
+  .dot.ok { background: var(--ok); }
+  .dot.fail { background: var(--err); }
+
+  .toast {
+    position: fixed; bottom: 20px; right: 20px; background: var(--text); color: #fff;
+    padding: 10px 16px; border-radius: 8px; font-size: 13px; opacity: 0; transform: translateY(8px);
+    transition: all .25s; pointer-events: none;
+  }
+  .toast.show { opacity: 1; transform: translateY(0); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Shopee Video Auto
+      <small>Dashboard điều khiển pipeline — chạy trên máy này</small>
+    </h1>
+    <div style="display:flex; gap:8px;">
+      <button class="btn" id="btn-check">Kiểm tra môi trường</button>
+      <button class="btn" id="btn-refresh">Làm mới</button>
+    </div>
+  </header>
+
+  <div class="cards">
+    <div class="card"><div class="n" id="c-pending">–</div><div class="l">Chờ chuẩn bị</div></div>
+    <div class="card"><div class="n" id="c-ready">–</div><div class="l">Sẵn sàng đăng</div></div>
+    <div class="card accent">
+      <div class="n"><span id="c-posted">–</span>/<span id="c-target">–</span></div>
+      <div class="l">Đã đăng hôm nay</div>
+      <div class="progress-row"><div class="progress-bar"><div id="c-progress" style="width:0%"></div></div></div>
+    </div>
+    <div class="card"><div class="n" id="c-failed">–</div><div class="l">Thất bại</div></div>
+    <div class="card"><div class="n" id="c-skipped">–</div><div class="l">Đã bỏ qua</div></div>
+  </div>
+
+  <div class="panel">
+    <h2>Thao tác <span class="sub" id="job-status-text"></span></h2>
+    <div class="actions">
+      <div class="action-card">
+        <h3>📂 Quét CSV mới</h3>
+        <p>Quét thư mục input_dir, nạp sản phẩm từ file CSV chưa từng nạp vào hàng đợi.</p>
+        <button class="btn" id="btn-scan">Quét ngay</button>
+      </div>
+      <div class="action-card">
+        <h3>🔍 Tìm &amp; tải video</h3>
+        <p>Với mỗi sản phẩm đang chờ: tìm clip TikTok khớp ảnh sản phẩm và tải về (không đụng điện thoại).</p>
+        <button class="btn btn-primary" id="btn-prepare">Chạy tìm &amp; tải video</button>
+      </div>
+      <div class="action-card">
+        <h3>📤 Đăng video</h3>
+        <p>Đăng các video đã sẵn sàng lên Shopee qua điện thoại, gắn giỏ hàng, xác nhận.</p>
+        <button class="btn btn-primary" id="btn-post">Chạy đăng bài</button>
+      </div>
+    </div>
+    <div class="joblog" id="joblog"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Hàng đợi sản phẩm <span class="sub" id="queue-count-sub"></span></h2>
+    <div class="tabs" id="tabs">
+      <div class="tab active" data-status="">Tất cả</div>
+      <div class="tab" data-status="pending">Chờ chuẩn bị</div>
+      <div class="tab" data-status="video_ready">Sẵn sàng đăng</div>
+      <div class="tab" data-status="posted">Đã đăng</div>
+      <div class="tab" data-status="prepare_failed">Lỗi chuẩn bị</div>
+      <div class="tab" data-status="post_failed">Lỗi đăng</div>
+      <div class="tab" data-status="skipped">Đã bỏ qua</div>
+    </div>
+    <div id="queue-table"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Cấu hình / tài nguyên</h2>
+    <dl class="config-grid" id="config-grid"></dl>
+  </div>
+
+  <div class="panel" id="check-panel" style="display:none">
+    <h2>Kết quả kiểm tra môi trường</h2>
+    <ul class="check-list" id="check-list"></ul>
+  </div>
+
+  <div class="panel">
+    <h2>Log gần đây</h2>
+    <div class="joblog show" id="history-log" style="max-height:260px"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (sel) => document.querySelector(sel);
+let currentTab = "";
+let jobPollTimer = null;
+
+function toast(msg) {
+  const el = $("#toast");
+  el.textContent = msg;
+  el.classList.add("show");
+  setTimeout(() => el.classList.remove("show"), 2500);
+}
+
+async function api(path, opts) {
+  const res = await fetch(path, opts);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+
+function fmtStatus(s) {
+  const map = {
+    pending: "Chờ chuẩn bị", video_ready: "Sẵn sàng đăng", posted: "Đã đăng",
+    prepare_failed: "Lỗi chuẩn bị", post_failed: "Lỗi đăng", skipped: "Đã bỏ qua",
+  };
+  return map[s] || s;
+}
+
+async function refreshStatus() {
+  const data = await api("/api/status");
+  const c = data.counts || {};
+  $("#c-pending").textContent = c.pending || 0;
+  $("#c-ready").textContent = c.video_ready || 0;
+  $("#c-posted").textContent = data.posted_today;
+  $("#c-target").textContent = data.daily_target;
+  $("#c-failed").textContent = (c.prepare_failed || 0) + (c.post_failed || 0);
+  $("#c-skipped").textContent = c.skipped || 0;
+  const pct = data.daily_target ? Math.min(100, (data.posted_today / data.daily_target) * 100) : 0;
+  $("#c-progress").style.width = pct + "%";
+
+  updateJobUI(data.job);
+  setButtonsDisabled(data.job.running);
+}
+
+function setButtonsDisabled(disabled) {
+  ["btn-scan", "btn-prepare", "btn-post"].forEach((id) => { $("#" + id).disabled = disabled; });
+}
+
+function updateJobUI(job) {
+  const log = $("#joblog");
+  const label = { scan: "Đang quét CSV…", prepare: "Đang tìm & tải video…", post: "Đang đăng bài…" };
+  if (job.running) {
+    $("#job-status-text").innerHTML = `<span class="spinner"></span>${label[job.kind] || "Đang chạy…"}`;
+    log.classList.add("show");
+  } else {
+    $("#job-status-text").textContent = "";
+  }
+  log.textContent = (job.log_lines || []).join("\n");
+  log.scrollTop = log.scrollHeight;
+
+  if (job.running && !jobPollTimer) {
+    jobPollTimer = setInterval(pollJob, 1200);
+  }
+  if (!job.running && jobPollTimer) {
+    clearInterval(jobPollTimer);
+    jobPollTimer = null;
+    if (job.summary) reportSummary(job.kind, job.summary);
+    if (job.error) toast("Lỗi: " + job.error);
+    refreshAll();
+  }
+}
+
+function reportSummary(kind, s) {
+  if (kind === "scan") {
+    toast(s.files_imported ? `Đã nạp ${s.products_added} sản phẩm từ ${s.files_imported} file mới` : "Không có file CSV mới");
+  } else if (kind === "prepare") {
+    toast(`Chuẩn bị xong: ${s.ready}/${s.total} video sẵn sàng`);
+  } else if (kind === "post") {
+    toast(`Đăng xong: ${s.success}/${s.total} video thành công`);
+  }
+}
+
+async function pollJob() {
+  try {
+    const job = await api("/api/job");
+    updateJobUI(job);
+    setButtonsDisabled(job.running);
+    if (!job.running) await refreshStatus();
+  } catch (e) { /* ignore transient poll errors */ }
+}
+
+async function runAction(path, btnId) {
+  try {
+    await api(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    setButtonsDisabled(true);
+    pollJob();
+  } catch (e) {
+    toast("Lỗi: " + e.message);
+  }
+}
+
+async function loadQueue() {
+  const items = await api("/api/queue?status=" + encodeURIComponent(currentTab) + "&limit=200");
+  const box = $("#queue-table");
+  $("#queue-count-sub").textContent = items.length + " dòng";
+  if (!items.length) {
+    box.innerHTML = '<div class="empty">Không có sản phẩm nào.</div>';
+    return;
+  }
+  const rows = items.map((it) => {
+    const actions = [];
+    if (["pending", "prepare_failed", "post_failed"].includes(it.status)) {
+      actions.push(`<button class="btn btn-sm btn-danger-ghost" data-act="skip" data-link="${esc(it.link)}">Bỏ qua</button>`);
+    }
+    if (["prepare_failed", "post_failed", "skipped"].includes(it.status)) {
+      actions.push(`<button class="btn btn-sm" data-act="requeue" data-link="${esc(it.link)}">Thử lại</button>`);
+    }
+    const sales = it.sales_count ? it.sales_count.toLocaleString("vi-VN") : "–";
+    return `<tr>
+      <td class="name">${esc(it.name)}</td>
+      <td>${sales}</td>
+      <td><span class="badge ${it.status}">${fmtStatus(it.status)}</span></td>
+      <td>${actions.join(" ")}</td>
+    </tr>`;
+  }).join("");
+  box.innerHTML = `<table><thead><tr><th>Sản phẩm</th><th>Lượt bán</th><th>Trạng thái</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+  box.querySelectorAll("button[data-act]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const link = btn.dataset.link;
+      const act = btn.dataset.act;
+      try {
+        await api(`/api/queue/${act}`, {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ link }),
+        });
+        await loadQueue();
+        await refreshStatus();
+      } catch (e) { toast("Lỗi: " + e.message); }
+    });
+  });
+}
+
+function esc(s) {
+  return (s || "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+async function loadConfig() {
+  const cfg = await api("/api/config");
+  const grid = $("#config-grid");
+  grid.innerHTML = `
+    <div><dt>Chỉ tiêu/ngày</dt><dd>${cfg.daily_target} video</dd></div>
+    <div><dt>Thư mục CSV đầu vào</dt><dd>${esc(cfg.product_source.input_dir)}</dd></div>
+    <div><dt>Ngưỡng lượt bán tối thiểu</dt><dd>${cfg.product_source.min_sales.toLocaleString("vi-VN")}</dd></div>
+    <div><dt>Ngưỡng view TikTok tối thiểu</dt><dd>${cfg.tiktok.min_views.toLocaleString("vi-VN")}</dd></div>
+    <div><dt>Thư mục tải video</dt><dd>${esc(cfg.tiktok.download_dir)}</dd></div>
+    <div><dt>Gói app Shopee</dt><dd>${esc(cfg.phone.shopee_app_package)}</dd></div>
+    <div><dt>Thiết bị ADB</dt><dd>${cfg.phone.adb_serial ? esc(cfg.phone.adb_serial) : "(tự động, máy duy nhất)"}</dd></div>
+    <div><dt>Selector điện thoại đã điền</dt><dd>${cfg.phone.ui_selectors_filled}/${cfg.phone.ui_selectors_total}</dd></div>
+  `;
+}
+
+async function loadHistoryLog() {
+  const entries = await api("/api/logs?limit=200");
+  const box = $("#history-log");
+  if (!entries.length) { box.textContent = "(chưa có log nào)"; return; }
+  box.textContent = entries.map((e) => `[${e.created_at}] ${e.stage} ${e.status}${e.detail ? " — " + e.detail : ""} ${e.product_link ? "(" + e.product_link + ")" : ""}`).join("\n");
+}
+
+async function runCheck() {
+  const results = await api("/api/check");
+  const panel = $("#check-panel");
+  panel.style.display = "";
+  $("#check-list").innerHTML = results.map((r) =>
+    `<li><span class="dot ${r.ok ? "ok" : "fail"}"></span>${esc(r.message)}</li>`
+  ).join("");
+}
+
+async function refreshAll() {
+  await Promise.all([refreshStatus(), loadQueue(), loadConfig(), loadHistoryLog()]);
+}
+
+$("#tabs").addEventListener("click", (e) => {
+  const tab = e.target.closest(".tab");
+  if (!tab) return;
+  document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
+  tab.classList.add("active");
+  currentTab = tab.dataset.status;
+  loadQueue();
+});
+
+$("#btn-scan").addEventListener("click", () => runAction("/api/scan"));
+$("#btn-prepare").addEventListener("click", () => runAction("/api/prepare"));
+$("#btn-post").addEventListener("click", () => runAction("/api/post"));
+$("#btn-refresh").addEventListener("click", refreshAll);
+$("#btn-check").addEventListener("click", runCheck);
+
+refreshAll();
+setInterval(refreshStatus, 5000);
+</script>
+</body>
+</html>

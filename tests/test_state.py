@@ -19,44 +19,10 @@ def store(tmp_path: Path) -> StateStore:
     s.close()
 
 
-def test_new_product_not_posted(store: StateStore) -> None:
-    assert store.is_product_posted("https://shopee.vn/product/1") is False
-
-
-def test_mark_and_check_posted(store: StateStore) -> None:
-    store.mark_product_posted("https://shopee.vn/p/1", "Áo thun", "https://tiktok.com/x", "success")
-    assert store.is_product_posted("https://shopee.vn/p/1") is True
-
-
-def test_failed_status_does_not_count_as_posted(store: StateStore) -> None:
-    store.mark_product_posted("https://shopee.vn/p/2", "Quần jean", None, "failed")
-    assert store.is_product_posted("https://shopee.vn/p/2") is False
-
-
-def test_count_posted_today_only_counts_success(store: StateStore) -> None:
-    store.mark_product_posted("https://shopee.vn/p/3", "A", "u1", "success")
-    store.mark_product_posted("https://shopee.vn/p/4", "B", "u2", "failed")
-    store.mark_product_posted("https://shopee.vn/p/5", "C", "u3", "success")
-    assert store.count_posted_today() == 2
-
-
-def test_mark_product_posted_upserts(store: StateStore) -> None:
-    store.mark_product_posted("https://shopee.vn/p/6", "D", None, "failed")
-    assert store.is_product_posted("https://shopee.vn/p/6") is False
-    store.mark_product_posted("https://shopee.vn/p/6", "D", "u4", "success")
-    assert store.is_product_posted("https://shopee.vn/p/6") is True
-    assert store.count_posted_today() == 1
-
-
-def test_log_stage_does_not_raise(store: StateStore) -> None:
-    store.log_stage("https://shopee.vn/p/7", "thumbnail", "success")
-    store.log_stage(None, "startup", "success", "pipeline booted")
-
-
-def _products(n: int) -> list[Product]:
+def _products(n: int, start: int = 0) -> list[Product]:
     return [
         Product(name=f"Product {i}", link=f"https://s.shopee.vn/p{i}", product_url=f"https://shopee.vn/product/{i}")
-        for i in range(n)
+        for i in range(start, start + n)
     ]
 
 
@@ -74,21 +40,96 @@ def test_enqueue_products_dedupes(store: StateStore) -> None:
 def test_queue_overflow_carries_to_next_pull(store: StateStore) -> None:
     store.enqueue_products(_products(12))
 
-    day1 = store.get_pending_queue(5)
+    day1 = store.get_pending_for_prepare(5)
     assert len(day1) == 5
     for p in day1:
-        store.mark_queue_status(p.link, "success")
+        store.mark_video_ready(p.link, f"/tmp/{p.link}.mp4", "https://tiktok.com/x")
+        store.mark_posted(p.link, "posted")
 
-    day2 = store.get_pending_queue(5)
+    day2 = store.get_pending_for_prepare(5)
     assert len(day2) == 5
     assert {p.link for p in day1}.isdisjoint({p.link for p in day2})
     for p in day2:
-        store.mark_queue_status(p.link, "success")
+        store.mark_video_ready(p.link, f"/tmp/{p.link}.mp4", "https://tiktok.com/x")
+        store.mark_posted(p.link, "posted")
     assert store.count_pending_queue() == 2
 
 
-def test_failed_queue_item_leaves_pending_pool(store: StateStore) -> None:
+def test_get_pending_for_prepare_no_limit_returns_all(store: StateStore) -> None:
+    store.enqueue_products(_products(7))
+    assert len(store.get_pending_for_prepare()) == 7
+
+
+def test_prepare_then_post_lifecycle(store: StateStore) -> None:
     store.enqueue_products(_products(1))
-    [p] = store.get_pending_queue(1)
-    store.mark_queue_status(p.link, "failed")
-    assert store.count_pending_queue() == 0
+    [p] = store.get_pending_for_prepare(1)
+
+    store.mark_video_ready(p.link, "/tmp/video.mp4", "https://tiktok.com/@x/video/1")
+    assert store.count_by_status() == {"video_ready": 1}
+
+    ready = store.get_ready_to_post(5)
+    assert len(ready) == 1
+    assert ready[0].video_path == "/tmp/video.mp4"
+    assert ready[0].tiktok_source_url == "https://tiktok.com/@x/video/1"
+
+    store.mark_posted(p.link, "posted")
+    assert store.count_by_status() == {"posted": 1}
+    assert store.count_posted_today() == 1
+
+
+def test_prepare_failed_item_does_not_become_ready(store: StateStore) -> None:
+    store.enqueue_products(_products(1))
+    [p] = store.get_pending_for_prepare(1)
+    store.mark_prepare_failed(p.link)
+    assert store.count_by_status() == {"prepare_failed": 1}
+    assert store.get_ready_to_post(5) == []
+
+
+def test_skip_queue_item(store: StateStore) -> None:
+    store.enqueue_products(_products(2))
+    [a, b] = store.get_pending_for_prepare(2)
+    assert store.skip_queue_item(a.link) is True
+    assert store.count_by_status() == {"pending": 1, "skipped": 1}
+    # already-skipped items can be skipped again harmlessly (still matches)
+    assert store.skip_queue_item(a.link) is True
+    # can't skip a nonexistent link
+    assert store.skip_queue_item("https://s.shopee.vn/does-not-exist") is False
+
+
+def test_skip_cannot_undo_posted(store: StateStore) -> None:
+    store.enqueue_products(_products(1))
+    [p] = store.get_pending_for_prepare(1)
+    store.mark_video_ready(p.link, "/tmp/v.mp4", "https://tiktok.com/x")
+    store.mark_posted(p.link, "posted")
+    assert store.skip_queue_item(p.link) is False
+    assert store.count_by_status() == {"posted": 1}
+
+
+def test_requeue_item_resets_to_pending(store: StateStore) -> None:
+    store.enqueue_products(_products(1))
+    [p] = store.get_pending_for_prepare(1)
+    store.mark_prepare_failed(p.link)
+    assert store.requeue_item(p.link) is True
+    assert store.count_by_status() == {"pending": 1}
+    assert len(store.get_pending_for_prepare()) == 1
+
+
+def test_list_queue_filters_by_status(store: StateStore) -> None:
+    store.enqueue_products(_products(3))
+    [a, b, c] = store.get_pending_for_prepare(3)
+    store.mark_prepare_failed(a.link)
+
+    pending_rows = store.list_queue(status="pending")
+    assert {r.product.link for r in pending_rows} == {b.link, c.link}
+
+    failed_rows = store.list_queue(status="prepare_failed")
+    assert len(failed_rows) == 1
+    assert failed_rows[0].product.link == a.link
+
+
+def test_log_stage_and_recent_log(store: StateStore) -> None:
+    store.log_stage("https://shopee.vn/p/7", "thumbnail", "success")
+    store.log_stage(None, "startup", "success", "pipeline booted")
+    entries = store.recent_log(10)
+    assert len(entries) == 2
+    assert entries[0]["stage"] == "startup"  # most recent first

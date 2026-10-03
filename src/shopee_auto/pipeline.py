@@ -1,20 +1,26 @@
-"""Orchestrate one full product cycle (pull from the durable queue -> match
-TikTok clip -> publish on Shopee -> verify) and the daily loop over the
-configured target. Every product is isolated in a try/except so one bad
-product (captcha, missing UI element, no matching clip) never aborts the
-rest of the day's run.
+"""Two independent phases, matching the dashboard's two buttons:
 
+- `prepare_videos`: pull pending products off the queue, find a matching
+  TikTok clip, download it (no watermark). Never touches the phone.
+- `post_ready`: pull products with a video already prepared, drive the
+  phone to publish + attach the cart, verify. Never touches TikTok/Lens.
+
+`run_daily`/`run_once` (used by the CLI/cron) are a thin convenience
+wrapper that runs both phases back to back for unattended use; the
+dashboard calls them separately so video prep (no phone needed) and
+posting (phone needed, physically watched) can happen at different times.
+
+Every product is isolated in a try/except so one bad product (captcha,
+missing UI element, no matching clip) never aborts the rest of a batch.
 Every run first scans `product_source.input_dir` for CSV exports it hasn't
 seen before (by content hash) and enqueues whatever's in them -- you just
-drop exported files in that folder, nothing else to run by hand. Then
-run-daily drains up to `daily_target` pending items off the queue each day;
-overflow automatically waits for the next day since it's simply still
-"pending".
+drop exported files in that folder, nothing else to run by hand.
 """
 
 from __future__ import annotations
 
 import dataclasses
+from pathlib import Path
 
 from shopee_auto.config import AppConfig
 from shopee_auto.image_search import CaptchaEncounteredError, GoogleLensSearch
@@ -22,16 +28,23 @@ from shopee_auto.logger import get_logger
 from shopee_auto.phone_control import PhoneAutomationError, PhoneController
 from shopee_auto.product_source import Product
 from shopee_auto import product_source
-from shopee_auto.state import StateStore
+from shopee_auto.state import QueueItem, StateStore
 from shopee_auto import tiktok
 
 log = get_logger("pipeline")
 
 
 @dataclasses.dataclass
+class PrepareResult:
+    product: Product
+    status: str  # "ready" | "failed"
+    detail: str = ""
+
+
+@dataclasses.dataclass
 class CycleResult:
     product: Product
-    status: str  # "success" | "skipped" | "failed"
+    status: str  # "success" | "failed"
     detail: str = ""
 
 
@@ -63,43 +76,27 @@ class Pipeline:
             log.info("Đã nạp %s: %d sản phẩm mới, %d trùng", path.name, added, duplicates)
         return files_imported, products_added, products_duplicate
 
-    def run_daily(self, max_videos: int | None = None) -> list[CycleResult]:
+    # -- phase 1: find + download a TikTok clip for each pending product --
+
+    def prepare_videos(self, limit: int | None = None) -> list[PrepareResult]:
         self.import_new_csvs()
-        remaining = self.cfg.daily_target - self.state.count_posted_today()
-        if max_videos is not None:
-            remaining = min(remaining, max_videos)
-        if remaining <= 0:
-            log.info("Đã đạt chỉ tiêu %d video hôm nay, dừng.", self.cfg.daily_target)
-            return []
-
-        candidates = self.state.get_pending_queue(remaining)
+        candidates = self.state.get_pending_for_prepare(limit)
         if not candidates:
-            log.info(
-                "Hàng đợi rỗng -- thả file CSV mới vào %s rồi chạy lại.",
-                self.cfg.product_source.input_dir,
-            )
+            log.info("Không có sản phẩm nào đang chờ chuẩn bị video.")
             return []
-        log.info("Lấy %d sản phẩm từ hàng đợi (cần đăng thêm %d video)", len(candidates), remaining)
+        log.info("Chuẩn bị video cho %d sản phẩm", len(candidates))
 
-        results: list[CycleResult] = []
-        with GoogleLensSearch(self.cfg.image_search) as lens, PhoneController(self.cfg.phone) as phone:
-            phone.check_ready()
+        results: list[PrepareResult] = []
+        with GoogleLensSearch(self.cfg.image_search) as lens:
             for product in candidates:
-                result = self._run_one(product, lens, phone)
-                self.state.mark_queue_status(product.link, result.status)
-                results.append(result)
+                results.append(self._prepare_one(product, lens))
 
-        posted = sum(1 for r in results if r.status == "success")
-        log.info("Hoàn tất đợt chạy: %d/%d video đăng thành công", posted, len(results))
+        ready = sum(1 for r in results if r.status == "ready")
+        log.info("Hoàn tất chuẩn bị: %d/%d sản phẩm có video sẵn sàng", ready, len(results))
         return results
 
-    def _run_one(
-        self,
-        product: Product,
-        lens: GoogleLensSearch,
-        phone: PhoneController,
-    ) -> CycleResult:
-        log.info("=== Xử lý sản phẩm: %s ===", product.name)
+    def _prepare_one(self, product: Product, lens: GoogleLensSearch) -> PrepareResult:
+        log.info("=== Chuẩn bị video cho: %s ===", product.name)
         try:
             thumb_path = product_source.download_thumbnail(
                 product, self.cfg.tiktok.download_dir / "thumbnails"
@@ -110,38 +107,92 @@ class Pipeline:
             tiktok_urls = lens.filter_tiktok_video_links(search_urls)
             if not tiktok_urls:
                 self.state.log_stage(product.link, "image_search", "failed", "no tiktok links found")
-                return CycleResult(product, "skipped", "Không tìm được video TikTok trùng ảnh")
+                self.state.mark_prepare_failed(product.link)
+                return PrepareResult(product, "failed", "Không tìm được video TikTok trùng ảnh")
 
             videos = tiktok.get_video_stats(tiktok_urls, self.cfg.tiktok.request_delay_seconds)
             best = tiktok.pick_best(videos, self.cfg.tiktok)
             if best is None:
                 self.state.log_stage(product.link, "tiktok_pick", "failed", "no video above min_views")
-                return CycleResult(product, "skipped", "Không có video đạt ngưỡng lượt xem")
+                self.state.mark_prepare_failed(product.link)
+                return PrepareResult(product, "failed", "Không có video đạt ngưỡng lượt xem")
 
             video_path = tiktok.download(best, self.cfg.tiktok.download_dir)
             self.state.log_stage(product.link, "tiktok_download", "success", best.url)
+            self.state.mark_video_ready(product.link, str(video_path), best.url)
+            return PrepareResult(product, "ready", best.url)
 
-            phone.push_video(video_path)
+        except CaptchaEncounteredError as exc:
+            log.warning("Bị chặn captcha khi tìm ảnh cho %s: %s", product.name, exc)
+            self.state.log_stage(product.link, "image_search", "captcha", str(exc))
+            self.state.mark_prepare_failed(product.link)
+            return PrepareResult(product, "failed", str(exc))
+        except Exception as exc:  # noqa: BLE001 - isolate failure to this product, keep the batch going
+            log.exception("Lỗi không xác định khi chuẩn bị %s", product.name)
+            self.state.log_stage(product.link, "unknown", "failed", str(exc))
+            self.state.mark_prepare_failed(product.link)
+            return PrepareResult(product, "failed", str(exc))
+
+    # -- phase 2: publish already-prepared videos on the phone -----------
+
+    def post_ready(self, max_videos: int | None = None) -> list[CycleResult]:
+        remaining = self.cfg.daily_target - self.state.count_posted_today()
+        if max_videos is not None:
+            remaining = min(remaining, max_videos)
+        if remaining <= 0:
+            log.info("Đã đạt chỉ tiêu %d video hôm nay, dừng.", self.cfg.daily_target)
+            return []
+
+        candidates = self.state.get_ready_to_post(remaining)
+        if not candidates:
+            log.info("Không có video nào sẵn sàng để đăng -- chạy \"Tìm & tải video\" trước.")
+            return []
+        log.info("Đăng %d video đã chuẩn bị (cần đăng thêm %d video)", len(candidates), remaining)
+
+        results: list[CycleResult] = []
+        with PhoneController(self.cfg.phone) as phone:
+            phone.check_ready()
+            for item in candidates:
+                results.append(self._post_one(item, phone))
+
+        posted = sum(1 for r in results if r.status == "success")
+        log.info("Hoàn tất đợt đăng: %d/%d video đăng thành công", posted, len(results))
+        return results
+
+    def _post_one(self, item: QueueItem, phone: PhoneController) -> CycleResult:
+        product = item.product
+        log.info("=== Đăng bài: %s ===", product.name)
+        try:
+            phone.push_video(Path(item.video_path))
             phone.open_shopee_app()
             phone.publish_video(caption=product.name, product_query=product.name)
             posted_ok = phone.verify_last_post()
 
             status = "success" if posted_ok else "failed"
-            detail = best.url if posted_ok else "verify_last_post trả về False (chưa thấy giỏ hàng)"
-            self.state.mark_product_posted(product.link, product.name, best.url, status)
-            self.state.log_stage(product.link, "publish", status, detail)
-            return CycleResult(product, status, detail)
+            detail = item.tiktok_source_url if posted_ok else "verify_last_post trả về False (chưa thấy giỏ hàng)"
+            self.state.mark_posted(product.link, "posted" if posted_ok else "post_failed")
+            self.state.log_stage(product.link, "publish", status, detail or "")
+            return CycleResult(product, status, detail or "")
 
-        except CaptchaEncounteredError as exc:
-            log.warning("Bị chặn captcha khi tìm ảnh cho %s: %s", product.name, exc)
-            self.state.log_stage(product.link, "image_search", "captcha", str(exc))
-            return CycleResult(product, "skipped", str(exc))
         except PhoneAutomationError as exc:
             log.error("Lỗi tự động hóa điện thoại cho %s: %s", product.name, exc)
-            self.state.mark_product_posted(product.link, product.name, None, "failed")
+            self.state.mark_posted(product.link, "post_failed")
             self.state.log_stage(product.link, "publish", "failed", str(exc))
             return CycleResult(product, "failed", str(exc))
-        except Exception as exc:  # noqa: BLE001 - isolate failure to this product, keep the run going
-            log.exception("Lỗi không xác định khi xử lý %s", product.name)
+        except Exception as exc:  # noqa: BLE001 - isolate failure to this product, keep the batch going
+            log.exception("Lỗi không xác định khi đăng %s", product.name)
+            self.state.mark_posted(product.link, "post_failed")
             self.state.log_stage(product.link, "unknown", "failed", str(exc))
             return CycleResult(product, "failed", str(exc))
+
+    # -- CLI/cron convenience: both phases back to back -------------------
+
+    def run_daily(self, max_videos: int | None = None) -> list[CycleResult]:
+        remaining = self.cfg.daily_target - self.state.count_posted_today()
+        if max_videos is not None:
+            remaining = min(remaining, max_videos)
+        if remaining <= 0:
+            log.info("Đã đạt chỉ tiêu %d video hôm nay, dừng.", self.cfg.daily_target)
+            return []
+        self.prepare_videos(limit=remaining)
+        return self.post_ready(max_videos=remaining)

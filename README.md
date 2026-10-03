@@ -39,13 +39,15 @@ Playwright/đăng nhập/CDP nào cho phần Shopee Affiliate cả.
 config/config.yaml              # mọi tham số + selector đều nằm ở đây
 src/shopee_auto/
   config.py                     # load config.yaml -> dataclass
-  state.py                      # SQLite: hàng đợi sản phẩm bền vững + chống đăng trùng + đếm số video/ngày
+  state.py                      # SQLite: hàng đợi sản phẩm bền vững (pending -> video_ready -> posted)
   product_source.py             # đọc CSV "Lấy link hàng loạt", lấy thumbnail qua HTTP thuần (og:image)
   image_search.py               # Playwright: reverse image search qua Google Lens
   tiktok.py                     # yt-dlp: đo lượt xem, chọn video, tải về (đã không watermark)
   phone_control.py              # uiautomator2/ADB: điều khiển app Shopee trên điện thoại thật
-  pipeline.py                   # nối toàn bộ pipeline, cô lập lỗi theo từng sản phẩm
-  cli.py                        # `shopee-auto import-csv|run-daily|run-once|check-setup`
+  pipeline.py                   # 2 giai đoạn: prepare_videos (tìm+tải clip) và post_ready (đăng điện thoại)
+  checks.py                     # kiểm tra môi trường dùng chung giữa CLI và dashboard
+  cli.py                        # `shopee-auto import-csv|prepare|post|run-daily|run-once|check-setup|web`
+  web.py + static/index.html    # dashboard web local điều khiển pipeline qua trình duyệt
 tests/test_state.py             # unit test cho state.py (phần duy nhất test được không cần thiết bị thật)
 ```
 
@@ -144,19 +146,27 @@ trước khi chạy `run-once`.
 
 ## Chạy
 
+Pipeline tách làm 2 giai đoạn độc lập — chạy riêng (CLI hoặc dashboard) hoặc
+gộp lại bằng `run-daily`/`run-once` cho cron:
+
 ```bash
 # kiểm tra môi trường trước
 shopee-auto check-setup
 
-# (tuỳ chọn) chỉ quét thư mục input_dir và nạp file mới, không đăng gì cả
+# (tuỳ chọn) chỉ quét thư mục input_dir và nạp file mới, không làm gì khác
 shopee-auto import-csv
 
-# đăng thử đúng 1 video để kiểm tra toàn bộ luồng (tự quét input_dir trước)
-shopee-auto run-once
+# Giai đoạn 1: tìm clip TikTok khớp ảnh + tải về cho từng sản phẩm đang chờ
+# (không đụng điện thoại) -- tự quét input_dir trước
+shopee-auto prepare
 
-# chạy đủ chỉ tiêu trong ngày (mặc định 5 video, dừng sớm nếu đã đủ
-# hoặc hàng đợi hết sản phẩm) -- cũng tự quét input_dir trước
-shopee-auto run-daily
+# Giai đoạn 2: đăng các video đã chuẩn bị lên điện thoại, gắn giỏ hàng,
+# xác nhận -- không tìm/tải clip mới
+shopee-auto post
+
+# Gộp cả 2 giai đoạn, dùng cho cron/chạy không giám sát:
+shopee-auto run-once   # đúng 1 video, kiểm tra nhanh toàn bộ luồng
+shopee-auto run-daily  # đủ chỉ tiêu trong ngày (mặc định 5 video)
 ```
 
 Đặt `run-daily` chạy tự động mỗi ngày bằng cron (Linux/macOS) hoặc Task
@@ -164,19 +174,66 @@ Scheduler (Windows), ví dụ cron 8h sáng mỗi ngày:
 ```
 0 8 * * * cd /path/to/shopee-video-auto && /usr/bin/env PATH=$PATH shopee-auto run-daily >> data/logs/cron.log 2>&1
 ```
-Không cần lịch riêng cho `import-csv` — `run-daily` đã tự quét thư mục mỗi
-lần chạy. Bạn chỉ cần nhớ thả file CSV vào `input_dir` trước giờ cron chạy.
+Không cần lịch riêng cho `import-csv`/`prepare`/`post` — `run-daily` đã gộp
+cả 3 bước. Bạn chỉ cần nhớ thả file CSV vào `input_dir` trước giờ cron chạy.
+
+## Dashboard
+
+Thay vì gõ lệnh, có thể điều khiển toàn bộ pipeline qua trình duyệt:
+
+```bash
+shopee-auto web
+```
+
+Mở `http://127.0.0.1:8787`. Đây là server chạy ngay trên máy bạn (không
+phải dịch vụ cloud, không có đăng nhập) — chỉ bạn truy cập được, vì nó cần
+quyền thẳng tới ADB/điện thoại/trình duyệt trên máy này.
+
+Trang gồm:
+- **Thẻ số liệu**: số sản phẩm đang chờ chuẩn bị, đã sẵn sàng đăng, đã đăng
+  hôm nay/chỉ tiêu, thất bại, đã bỏ qua.
+- **3 nút thao tác**: Quét CSV mới / Tìm & tải video (giai đoạn 1) / Đăng
+  video (giai đoạn 2) — mỗi nút chạy nền, có log trực tiếp ngay bên dưới,
+  và tự khóa các nút khác lại trong lúc chạy (không chạy 2 việc cùng lúc
+  tranh nhau điện thoại/trình duyệt).
+- **Bảng quản lý hàng đợi**: lọc theo trạng thái, mỗi dòng có thể **Bỏ qua**
+  (loại hẳn khỏi hàng đợi, ví dụ không muốn affiliate sản phẩm đó nữa) hoặc
+  **Thử lại** (đưa về `pending` để chuẩn bị lại từ đầu, dùng cho sản phẩm bị
+  lỗi).
+- **Cấu hình/tài nguyên**: xem nhanh `daily_target`, thư mục CSV, ngưỡng lọc,
+  gói app Shopee, số selector điện thoại đã điền — không cần mở `config.yaml`.
+- **Kiểm tra môi trường**: tương đương `check-setup`, bấm 1 nút xem ngay.
+- **Log gần đây**: lịch sử chi tiết từng bước của từng sản phẩm (bảng
+  `run_log`), hữu ích khi cần biết chính xác sản phẩm nào lỗi ở bước nào.
+
+Chạy `shopee-auto web --host 0.0.0.0` nếu muốn truy cập từ thiết bị khác
+trong cùng mạng LAN (ví dụ xem tiến độ từ điện thoại) — cân nhắc rủi ro vì
+khi đó bất kỳ ai trong mạng cũng điều khiển được pipeline (không có xác
+thực).
 
 ## Chống trùng lặp & giới hạn hàng ngày
 
-Hai lớp bảo vệ độc lập trong `data/state.db` (SQLite):
-- **Hàng đợi (`product_queue`)**: mỗi sản phẩm (theo "Link ưu đãi") chỉ vào
-  hàng đợi đúng 1 lần dù bạn `import-csv` bao nhiêu file chồng lặp nhau,
-  và mỗi ngày `run-daily` rút đúng `daily_target` sản phẩm **chưa xử lý**
-  theo thứ tự vào trước, đảm bảo 1 sản phẩm không bao giờ được chọn 2 lần.
-- **Lịch sử đăng bài (`posted_products`)**: `count_posted_today()` đảm bảo
-  không vượt `daily_target` dù bạn chạy `run-daily` nhiều lần trong cùng
-  một ngày (ví dụ sau khi sửa lỗi và chạy lại).
+Một bảng duy nhất (`product_queue` trong `data/state.db`) theo dõi toàn bộ
+vòng đời mỗi sản phẩm, dedup theo "Link ưu đãi" (UNIQUE):
+
+```
+pending ──(prepare_videos)──> video_ready ──(post_ready)──> posted
+   │                               │
+   └──> prepare_failed             └──> post_failed
+(pending / *_failed) ──(bỏ qua thủ công)──> skipped
+```
+
+- Một sản phẩm chỉ vào hàng đợi **đúng 1 lần**, dù bạn thả bao nhiêu file
+  CSV chồng lặp nhau.
+- `post_ready` chỉ rút đúng phần còn thiếu của `daily_target` (trừ số đã
+  `posted` trong ngày hôm nay), nên chạy `run-daily`/bấm "Đăng video" nhiều
+  lần trong cùng 1 ngày không bao giờ vượt chỉ tiêu.
+- Sản phẩm `prepare_failed`/`post_failed` **không tự động thử lại** (tránh 1
+  sản phẩm lỗi vĩnh viễn chặn hết hàng đợi) — dùng nút "Thử lại" trên
+  dashboard (hoặc `requeue_item`) để đưa về `pending` thử lại thủ công.
+- Sản phẩm dư ngoài `daily_target` đơn giản vẫn còn `pending`/`video_ready`
+  và được xử lý ở lượt chạy sau — đó là toàn bộ cơ chế "để dành sang hôm
+  sau", không cần logic carry-over riêng.
 
 ## Xử lý sự cố thường gặp
 
