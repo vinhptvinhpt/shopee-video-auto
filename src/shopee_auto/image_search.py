@@ -105,14 +105,28 @@ class GoogleLensSearch:
                 if page.get_by_text(re.compile("unusual traffic|captcha", re.I)).count() > 0:
                     raise CaptchaEncounteredError("Google Lens hiện captcha sau khi thêm từ khoá.")
 
-            links = page.locator(selector)
-            count = links.count()
-            urls = []
-            for i in range(count):
-                href = links.nth(i).get_attribute("href")
-                if href:
-                    urls.append(href)
-            log.info("Google Lens trả về %d link trên trang kết quả", len(urls))
+            # The real result grid can be rendered inside an <iframe> (seen
+            # in practice: the top-level page is just the normal Google
+            # search chrome -- header/footer nav links only, zero actual
+            # results -- while the visual-match tiles live in a child
+            # frame). page.locator() only sees the main frame, so scan every
+            # frame on the page and merge their links instead of assuming
+            # everything is in the top-level document.
+            urls: list[str] = []
+            for frame in page.frames:
+                try:
+                    frame_links = frame.locator(selector)
+                    count = frame_links.count()
+                except Exception:  # noqa: BLE001 - a detached/cross-origin frame can throw; skip it
+                    continue
+                for i in range(count):
+                    try:
+                        href = frame_links.nth(i).get_attribute("href")
+                    except Exception:  # noqa: BLE001
+                        href = None
+                    if href:
+                        urls.append(href)
+            log.info("Google Lens trả về %d link trên trang kết quả (quét %d frame)", len(urls), len(page.frames))
 
             if not any(_TIKTOK_VIDEO_RE.search(u) for u in urls):
                 # Could be a genuine "no matching TikTok video" -- or the
@@ -121,8 +135,9 @@ class GoogleLensSearch:
                 # having to reproduce the run.
                 sample = urls[:40]
                 log.warning(
-                    "Không có link TikTok nào trong %d link thu được. Mẫu link: %s",
+                    "Không có link TikTok nào trong %d link thu được (URL hiện tại: %s). Mẫu link: %s",
                     len(urls),
+                    page.url,
                     sample,
                 )
                 if self._debug_dir:
@@ -157,23 +172,26 @@ class GoogleLensSearch:
             "input[placeholder*='search' i]",
             "[role='combobox']",
         ]
-        for candidate in candidates:
-            if not candidate:
-                continue
-            box = page.locator(candidate).first
-            try:
-                if box.count() == 0:
+        # Same reasoning as the result grid: the search box can live inside
+        # an <iframe>, not the main document, so try every frame.
+        for frame in page.frames:
+            for candidate in candidates:
+                if not candidate:
                     continue
-                box.click()
-                box.fill(self._cfg.keyword)
-                box.press("Enter")
-                page.wait_for_load_state("networkidle")
-                page.wait_for_timeout(1500)
-                log.info("Đã thêm từ khoá '%s' vào tìm kiếm Lens (selector: %s)", self._cfg.keyword, candidate)
-                return
-            except Exception:  # noqa: BLE001 - try the next candidate selector
-                log.debug("Selector '%s' không gõ được từ khoá, thử selector khác", candidate, exc_info=True)
-                continue
+                try:
+                    box = frame.locator(candidate).first
+                    if box.count() == 0:
+                        continue
+                    box.click()
+                    box.fill(self._cfg.keyword)
+                    box.press("Enter")
+                    page.wait_for_load_state("networkidle")
+                    page.wait_for_timeout(1500)
+                    log.info("Đã thêm từ khoá '%s' vào tìm kiếm Lens (selector: %s)", self._cfg.keyword, candidate)
+                    return
+                except Exception:  # noqa: BLE001 - try the next candidate selector/frame
+                    log.debug("Selector '%s' không gõ được từ khoá, thử selector khác", candidate, exc_info=True)
+                    continue
         log.warning(
             "Không tìm được ô nhập từ khoá trên trang Lens để gõ '%s' -- tiếp tục chỉ tìm bằng ảnh.",
             self._cfg.keyword,
