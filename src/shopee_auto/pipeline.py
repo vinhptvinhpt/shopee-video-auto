@@ -99,9 +99,10 @@ class Pipeline:
         # One Playwright driver shared by both -- the sync API only tolerates
         # a single sync_playwright() instance per thread.
         debug_dir = self.cfg.logging.log_dir / "thumbnail_debug"
+        lens_debug_dir = self.cfg.logging.log_dir / "lens_debug"
         with sync_playwright() as pw, product_source.ThumbnailFetcher(
             pw, debug_dir=debug_dir, cdp_endpoint=self.cfg.product_source.cdp_endpoint
-        ) as thumbs, GoogleLensSearch(pw, self.cfg.image_search) as lens:
+        ) as thumbs, GoogleLensSearch(pw, self.cfg.image_search, debug_dir=lens_debug_dir) as lens:
             for product in candidates:
                 results.append(self._prepare_one(product, thumbs, lens))
 

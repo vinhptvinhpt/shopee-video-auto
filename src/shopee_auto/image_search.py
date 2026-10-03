@@ -34,9 +34,10 @@ class GoogleLensSearch:
     sync_playwright() driver per thread, and prepare_videos also needs one
     for ThumbnailFetcher in the same thread."""
 
-    def __init__(self, playwright: Playwright, cfg: ImageSearchConfig):
+    def __init__(self, playwright: Playwright, cfg: ImageSearchConfig, debug_dir: Path | None = None):
         self._playwright = playwright
         self._cfg = cfg
+        self._debug_dir = debug_dir
         self._context: BrowserContext | None = None
 
     def __enter__(self) -> "GoogleLensSearch":
@@ -67,6 +68,11 @@ class GoogleLensSearch:
 
             page.set_input_files(sel["file_input"], str(image_path))
             page.wait_for_load_state("networkidle")
+            # The visual-match grid is a client-rendered component that can
+            # still be populating after "networkidle" fires (that event just
+            # means the network went quiet, not that rendering is done) --
+            # give it a moment before reading the DOM.
+            page.wait_for_timeout(2000)
 
             if page.get_by_text(re.compile("unusual traffic|captcha", re.I)).count() > 0:
                 raise CaptchaEncounteredError("Google Lens hiện captcha sau khi upload ảnh.")
@@ -79,6 +85,28 @@ class GoogleLensSearch:
                 if href:
                     urls.append(href)
             log.info("Google Lens trả về %d link trên trang kết quả", len(urls))
+
+            if not any(_TIKTOK_VIDEO_RE.search(u) for u in urls):
+                # Could be a genuine "no matching TikTok video" -- or the
+                # selector/timing missed the real result grid entirely.
+                # Dump everything needed to tell the two apart without
+                # having to reproduce the run.
+                sample = urls[:40]
+                log.warning(
+                    "Không có link TikTok nào trong %d link thu được. Mẫu link: %s",
+                    len(urls),
+                    sample,
+                )
+                if self._debug_dir:
+                    self._debug_dir.mkdir(parents=True, exist_ok=True)
+                    stem = image_path.stem
+                    try:
+                        page.screenshot(path=str(self._debug_dir / f"{stem}_lens.png"), full_page=True)
+                        (self._debug_dir / f"{stem}_lens.html").write_text(page.content(), encoding="utf-8")
+                        log.info("Đã lưu debug: %s_lens.png / .html trong %s", stem, self._debug_dir)
+                    except Exception:  # noqa: BLE001 - debug capture is best-effort
+                        log.exception("Không lưu được debug screenshot/html cho Google Lens")
+
             return urls
         finally:
             page.close()
