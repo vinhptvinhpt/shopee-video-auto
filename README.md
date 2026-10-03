@@ -129,6 +129,12 @@ DevTools Protocol). Vì trình duyệt không hề được khởi chạy bởi 
 động hóa, Shopee không có gì để chặn (không cần đăng nhập Shopee trong cửa
 sổ này — trang sản phẩm công khai, chỉ cần trông giống trình duyệt thật).
 
+**Dashboard (`shopee-auto web`) đã có sẵn panel "Chrome để lấy ảnh sản
+phẩm"** ở đầu trang — hiện đúng lệnh cần chạy (nút Copy), dòng cần thêm
+vào `config.yaml`, và trạng thái kết nối theo thời gian thực (tự kiểm tra
+lại mỗi 8 giây). Làm theo panel đó là đủ, không cần đọc các bước dưới đây
+nữa trừ khi dùng CLI thuần:
+
 1. Đóng hết Chrome hiện tại (kiểm tra Task Manager không còn tiến trình
    `chrome.exe` nào).
 2. Mở Command Prompt, chạy (sửa đường dẫn nếu Chrome cài chỗ khác):
@@ -137,7 +143,8 @@ sổ này — trang sản phẩm công khai, chỉ cần trông giống trình d
    ```
    **Để nguyên cửa sổ này mở** suốt thời gian chạy "Tìm & tải video" — mỗi
    lần chạy, trình duyệt sẽ tự mở/đóng tab trong chính cửa sổ này.
-3. Sửa `config/config.yaml`: đặt `product_source.cdp_endpoint: "http://localhost:9222"`.
+3. Sửa `config/config.yaml`: đặt `product_source.cdp_endpoint: "http://localhost:9222"`,
+   rồi khởi động lại `shopee-auto web` (file config chỉ đọc lúc khởi động).
 4. Chạy lại "Tìm & tải video" (hoặc `shopee-auto prepare`) — lần này sẽ kết
    nối vào đúng cửa sổ Chrome bạn vừa mở, không mở cửa sổ mới nào nữa.
 

@@ -116,6 +116,21 @@
   .dot.ok { background: var(--ok); }
   .dot.fail { background: var(--err); }
 
+  .chrome-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px; }
+  .chrome-badge.ok { background: var(--ok-bg); color: var(--ok); }
+  .chrome-badge.bad { background: var(--err-bg); color: var(--err); }
+  .chrome-badge.off { background: #f1f2f4; color: var(--muted); }
+  .chrome-badge .dot2 { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+  .code-row {
+    display: flex; align-items: stretch; gap: 8px; margin-top: 10px;
+  }
+  .code-row code {
+    flex: 1; background: #0f1117; color: #d7dbe0; border-radius: 8px; padding: 10px 12px;
+    font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-x: auto; white-space: pre;
+  }
+  .chrome-steps { margin: 10px 0 0; padding-left: 18px; font-size: 13px; color: var(--text); }
+  .chrome-steps li { margin-bottom: 4px; }
+
   .toast {
     position: fixed; bottom: 20px; right: 20px; background: var(--text); color: #fff;
     padding: 10px 16px; border-radius: 8px; font-size: 13px; opacity: 0; transform: translateY(8px);
@@ -146,6 +161,33 @@
     </div>
     <div class="card"><div class="n" id="c-failed">–</div><div class="l">Thất bại</div></div>
     <div class="card"><div class="n" id="c-skipped">–</div><div class="l">Đã bỏ qua</div></div>
+  </div>
+
+  <div class="panel">
+    <h2>Chrome để lấy ảnh sản phẩm <span class="chrome-badge off" id="chrome-badge"><span class="dot2"></span><span id="chrome-badge-text">Đang kiểm tra…</span></span></h2>
+    <p style="margin:0; font-size:13px; color:var(--muted)">
+      Shopee chặn trình duyệt do Playwright tự mở (redirect sang
+      <code>verify/traffic/error</code>) khi lấy ảnh sản phẩm. Mở sẵn 1 cửa sổ
+      Chrome thật theo lệnh dưới đây và <b>để nguyên</b> trước khi bấm "Tìm &amp; tải video".
+    </p>
+    <ol class="chrome-steps">
+      <li>Đóng hết Chrome đang mở trên máy (kiểm tra Task Manager không còn <code>chrome.exe</code>).</li>
+      <li>Mở Command Prompt, chạy lệnh dưới đây (bấm "Copy" để copy nguyên dòng):</li>
+    </ol>
+    <div class="code-row">
+      <code id="chrome-cmd">…</code>
+      <button class="btn btn-sm" id="btn-copy-cmd">Copy</button>
+    </div>
+    <ol class="chrome-steps" start="3">
+      <li>Để nguyên cửa sổ Chrome đó mở suốt quá trình dùng dashboard.</li>
+      <li id="chrome-config-note" style="display:none">
+        Thêm dòng này vào <code>config/config.yaml</code> (trong mục
+        <code>product_source:</code>), rồi khởi động lại <code>shopee-auto web</code>:
+        <div class="code-row"><code id="chrome-config-line">…</code>
+          <button class="btn btn-sm" id="btn-copy-config">Copy</button></div>
+      </li>
+    </ol>
+    <button class="btn btn-sm" id="btn-check-chrome" style="margin-top:8px">Kiểm tra lại kết nối</button>
   </div>
 
   <div class="panel">
@@ -214,6 +256,7 @@ let currentTab = "";
 let jobPollTimer = null;
 const selected = new Set();       // links the user ticked, across tab switches
 const queueByLink = new Map();    // link -> latest known item (status etc.)
+let chromeStatus = { configured: false, connected: false };
 
 function toast(msg) {
   const el = $("#toast");
@@ -311,6 +354,9 @@ async function runJob(path, body) {
 }
 
 function runPrepare() {
+  if (chromeStatus.configured && !chromeStatus.connected) {
+    if (!confirm('Chưa phát hiện cửa sổ Chrome debug đang mở (xem panel "Chrome để lấy ảnh sản phẩm" phía trên) — chạy vẫn sẽ bị Shopee chặn lấy ảnh. Vẫn chạy?')) return;
+  }
   const picked = [...selected].filter((l) => queueByLink.get(l)?.status === "pending");
   if (picked.length) { runJob("/api/prepare", { links: picked }); return; }
   const totalPending = Number($("#c-pending").textContent) || 0;
@@ -450,6 +496,46 @@ async function loadConfig() {
     <div><dt>Thiết bị ADB</dt><dd>${cfg.phone.adb_serial ? esc(cfg.phone.adb_serial) : "(tự động, máy duy nhất)"}</dd></div>
     <div><dt>Selector điện thoại đã điền</dt><dd>${cfg.phone.ui_selectors_filled}/${cfg.phone.ui_selectors_total}</dd></div>
   `;
+
+  $("#chrome-cmd").textContent = cfg.chrome_setup.command;
+  $("#chrome-config-note").style.display = cfg.chrome_setup.configured ? "none" : "";
+  $("#chrome-config-line").textContent = cfg.chrome_setup.config_line;
+}
+
+async function checkChromeStatus() {
+  const s = await api("/api/chrome-status");
+  chromeStatus = s;
+  const badge = $("#chrome-badge");
+  const text = $("#chrome-badge-text");
+  if (!s.configured) {
+    badge.className = "chrome-badge off";
+    text.textContent = "Chưa cấu hình trong config.yaml";
+  } else if (s.connected) {
+    badge.className = "chrome-badge ok";
+    text.textContent = "Đang kết nối" + (s.browser ? ` (${s.browser})` : "");
+  } else {
+    badge.className = "chrome-badge bad";
+    text.textContent = "Chưa mở / không kết nối được";
+  }
+}
+
+async function copyText(text, btn) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch (e) {
+    // clipboard API may be unavailable (non-HTTPS/older browser) -- fall back to a manual-select textarea
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    document.body.removeChild(ta);
+  }
+  const original = btn.textContent;
+  btn.textContent = "Đã copy!";
+  setTimeout(() => { btn.textContent = original; }, 1500);
 }
 
 async function loadHistoryLog() {
@@ -469,7 +555,7 @@ async function runCheck() {
 }
 
 async function refreshAll() {
-  await Promise.all([refreshStatus(), loadQueue(), loadConfig(), loadHistoryLog()]);
+  await Promise.all([refreshStatus(), loadQueue(), loadConfig(), loadHistoryLog(), checkChromeStatus()]);
 }
 
 $("#tabs").addEventListener("click", (e) => {
@@ -487,9 +573,13 @@ $("#btn-post").addEventListener("click", runPost);
 $("#btn-refresh").addEventListener("click", refreshAll);
 $("#btn-check").addEventListener("click", runCheck);
 $("#sel-clear").addEventListener("click", () => { selected.clear(); updateSelBar(); renderQueueTable(); });
+$("#btn-check-chrome").addEventListener("click", checkChromeStatus);
+$("#btn-copy-cmd").addEventListener("click", (e) => copyText($("#chrome-cmd").textContent, e.target));
+$("#btn-copy-config").addEventListener("click", (e) => copyText($("#chrome-config-line").textContent, e.target));
 
 refreshAll();
 setInterval(refreshStatus, 5000);
+setInterval(checkChromeStatus, 8000);
 </script>
 </body>
 </html>

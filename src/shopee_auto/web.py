@@ -14,10 +14,13 @@ for its duration so the dashboard can show a live-ish log by polling
 from __future__ import annotations
 
 import dataclasses
+import json
 import logging
 import threading
 import time
+import urllib.request
 from pathlib import Path
+from urllib.parse import urlparse
 
 from flask import Flask, jsonify, request, send_from_directory
 
@@ -26,6 +29,17 @@ from shopee_auto.config import AppConfig
 from shopee_auto.pipeline import Pipeline
 
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
+_DEFAULT_CDP_PORT = 9222
+
+
+def _chrome_launch_command(port: int) -> str:
+    """Windows command to open a real, non-automated Chrome with a remote
+    debugging port -- see README "Thumbnail bị Shopee chặn"."""
+    return (
+        '"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" '
+        f"--remote-debugging-port={port} "
+        '--user-data-dir="C:\\shopee-chrome-profile"'
+    )
 
 
 @dataclasses.dataclass
@@ -252,12 +266,20 @@ def create_app(cfg: AppConfig) -> Flask:
 
     @app.get("/api/config")
     def config_view():
+        endpoint = cfg.product_source.cdp_endpoint
+        port = urlparse(endpoint).port if endpoint else _DEFAULT_CDP_PORT
         return jsonify(
             {
                 "daily_target": cfg.daily_target,
                 "product_source": {
                     "input_dir": str(cfg.product_source.input_dir),
                     "min_sales": cfg.product_source.min_sales,
+                },
+                "chrome_setup": {
+                    "configured": bool(endpoint),
+                    "endpoint": endpoint,
+                    "command": _chrome_launch_command(port or _DEFAULT_CDP_PORT),
+                    "config_line": f'  cdp_endpoint: "http://localhost:{port or _DEFAULT_CDP_PORT}"',
                 },
                 "tiktok": {
                     "min_views": cfg.tiktok.min_views,
@@ -277,5 +299,18 @@ def create_app(cfg: AppConfig) -> Flask:
     def check():
         results = run_checks(cfg)
         return jsonify([{"ok": r.ok, "message": r.message} for r in results])
+
+    @app.get("/api/chrome-status")
+    def chrome_status():
+        endpoint = cfg.product_source.cdp_endpoint
+        if not endpoint:
+            return jsonify({"configured": False, "connected": False})
+        try:
+            url = endpoint.rstrip("/") + "/json/version"
+            with urllib.request.urlopen(url, timeout=2) as resp:
+                data = json.loads(resp.read())
+            return jsonify({"configured": True, "connected": True, "browser": data.get("Browser", "")})
+        except Exception as exc:  # noqa: BLE001 - "not reachable" is an expected, normal result here
+            return jsonify({"configured": True, "connected": False, "error": str(exc)})
 
     return app
