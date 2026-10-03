@@ -36,6 +36,11 @@ class ImageSearchConfig:
     max_results: int
     headless: bool
     selectors: dict[str, str]
+    # Typed into Lens's "Add to your search" box after the image upload, so
+    # results are visual matches that *also* mention this word -- massively
+    # increases the odds a result is a tiktok.com page instead of a generic
+    # visually-similar product listing. Empty string disables this step.
+    keyword: str = "tiktok"
 
 
 @dataclasses.dataclass
@@ -108,6 +113,7 @@ def load_config(path: Path | str = DEFAULT_CONFIG_PATH) -> AppConfig:
             max_results=ims["max_results"],
             headless=ims["headless"],
             selectors=ims["selectors"],
+            keyword=ims.get("keyword", "tiktok"),
         ),
         tiktok=TikTokConfig(
             min_views=tk["min_views"],

@@ -29,6 +29,11 @@ image_search:
   search_url: "https://lens.google.com/upload"
   max_results: 10
   headless: false
+  # Typed into Lens's "Add to your search" box after the image upload, so
+  # results have to visually match AND mention this word -- much more
+  # likely to surface a tiktok.com link directly instead of random visually
+  # similar product listings. Set to "" to disable and search by image only.
+  keyword: "tiktok"
   selectors:
     file_input: "input[type='file']"
     # Left empty on purpose: Google's result-card markup/classes change too
@@ -37,6 +42,10 @@ image_search:
     # video -- no calibration needed. Only set this if you want to narrow
     # the search to a specific result section yourself.
     result_link: ""
+    # Same idea: left empty so the code tries a list of likely selectors
+    # for Lens's search-box itself. Only set this if that auto-detection
+    # fails (see data/logs/lens_debug when 0 results are found).
+    search_box: ""
 
 tiktok:
   min_views: 50000

@@ -77,6 +77,11 @@ class GoogleLensSearch:
             if page.get_by_text(re.compile("unusual traffic|captcha", re.I)).count() > 0:
                 raise CaptchaEncounteredError("Google Lens hiện captcha sau khi upload ảnh.")
 
+            if self._cfg.keyword:
+                self._add_keyword_to_search(page, sel.get("search_box"))
+                if page.get_by_text(re.compile("unusual traffic|captcha", re.I)).count() > 0:
+                    raise CaptchaEncounteredError("Google Lens hiện captcha sau khi thêm từ khoá.")
+
             links = page.locator(selector)
             count = links.count()
             urls = []
@@ -110,6 +115,46 @@ class GoogleLensSearch:
             return urls
         finally:
             page.close()
+
+    def _add_keyword_to_search(self, page, custom_selector: str | None) -> None:
+        """Types `self._cfg.keyword` into Lens's "Add to your search" box
+        and submits it, so results must visually match *and* mention that
+        word -- far more likely to be an actual tiktok.com page than a
+        generic visually-similar product listing. Best-effort: Google's
+        markup for this box isn't documented/stable, so a list of likely
+        selectors is tried in order, and failing to find any of them just
+        means we fall back to the plain image search instead of raising."""
+        candidates = [custom_selector] if custom_selector else []
+        candidates += [
+            "textarea[aria-label='Search']",
+            "input[aria-label='Search']",
+            "textarea[aria-label*='search' i]",
+            "input[aria-label*='search' i]",
+            "textarea[placeholder*='search' i]",
+            "input[placeholder*='search' i]",
+            "[role='combobox']",
+        ]
+        for candidate in candidates:
+            if not candidate:
+                continue
+            box = page.locator(candidate).first
+            try:
+                if box.count() == 0:
+                    continue
+                box.click()
+                box.fill(self._cfg.keyword)
+                box.press("Enter")
+                page.wait_for_load_state("networkidle")
+                page.wait_for_timeout(1500)
+                log.info("Đã thêm từ khoá '%s' vào tìm kiếm Lens (selector: %s)", self._cfg.keyword, candidate)
+                return
+            except Exception:  # noqa: BLE001 - try the next candidate selector
+                log.debug("Selector '%s' không gõ được từ khoá, thử selector khác", candidate, exc_info=True)
+                continue
+        log.warning(
+            "Không tìm được ô nhập từ khoá trên trang Lens để gõ '%s' -- tiếp tục chỉ tìm bằng ảnh.",
+            self._cfg.keyword,
+        )
 
     @staticmethod
     def filter_tiktok_video_links(urls: list[str]) -> list[str]:

@@ -163,6 +163,14 @@ chứng, và Shopee đổi markup định kỳ.
   ```bash
   playwright codegen https://lens.google.com/upload
   ```
+  Sau khi upload ảnh, code còn tự gõ thêm từ khoá `image_search.keyword`
+  (mặc định `"tiktok"`) vào ô tìm kiếm của Lens rồi Enter — kết quả vừa
+  phải giống ảnh, vừa phải nhắc đến từ khoá đó, nên tỉ lệ ra đúng link
+  tiktok.com cao hơn nhiều so với chỉ tìm bằng ảnh. Đặt `keyword: ""` nếu
+  muốn tắt bước này. Ô nhập từ khoá cũng tự dò qua vài selector khả dĩ —
+  nếu Google đổi markup khiến không dò được, log sẽ cảnh báo và vẫn tiếp
+  tục tìm chỉ bằng ảnh (không crash); điền
+  `image_search.selectors.search_box` nếu bạn muốn chỉ định selector riêng.
 
 - **App Shopee trên điện thoại**: dùng uiautomator2 inspector —
   ```bash
