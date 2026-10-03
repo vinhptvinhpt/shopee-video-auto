@@ -33,6 +33,34 @@ _USER_AGENT = (
     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 )
 
+# Finds the largest currently-visible image on the page, whether it's a
+# plain <img>, a lazy-loaded one (data-src/data-original), or a CSS
+# background-image -- avoids having to guess Shopee's exact markup/selector.
+_LARGEST_IMAGE_JS = """
+() => {
+    const candidates = [];
+    const addCandidate = (src, rect) => {
+        if (!src || src.startsWith("data:")) return;
+        const area = rect.width * rect.height;
+        if (area > 0) candidates.push({ src, area });
+    };
+    document.querySelectorAll("img").forEach((img) => {
+        // Lazy-loaded images often sit on a data: placeholder until scrolled
+        // into view -- prefer the real data-src/data-original over that
+        // placeholder rather than letting it win and get discarded below.
+        const src = img.getAttribute("data-src") || img.getAttribute("data-original") || img.currentSrc || img.src || "";
+        addCandidate(src, img.getBoundingClientRect());
+    });
+    document.querySelectorAll("*").forEach((el) => {
+        const bg = getComputedStyle(el).backgroundImage;
+        const match = bg && bg.match(/url\\((['"]?)(.*?)\\1\\)/);
+        if (match && match[2]) addCandidate(match[2], el.getBoundingClientRect());
+    });
+    candidates.sort((a, b) => b.area - a.area);
+    return candidates.length ? candidates[0].src : "";
+}
+"""
+
 
 @dataclasses.dataclass
 class Product:
@@ -108,8 +136,8 @@ class ThumbnailFetcher:
         try:
             page.goto(product_url, wait_until="domcontentloaded", timeout=timeout * 1000)
             try:
-                page.wait_for_selector('meta[property="og:image"]', timeout=timeout * 1000, state="attached")
-            except Exception:  # noqa: BLE001 - fall through to the <img> fallback below
+                page.wait_for_selector("img", timeout=min(timeout, 10) * 1000)
+            except Exception:  # noqa: BLE001 - proceed with whatever rendered so far
                 pass
 
             meta = page.locator('meta[property="og:image"]')
@@ -118,13 +146,19 @@ class ThumbnailFetcher:
                 if content:
                     return content
 
-            img = page.locator("img[src*='susercontent.com']").first
-            if img.count() > 0:
-                src = img.get_attribute("src")
-                if src:
-                    return src
+            # Shopee's product photo isn't always a plain <img src> -- it can
+            # be lazy-loaded (data-src) or a CSS background-image. Scan the
+            # whole rendered page for the largest visible image instead of
+            # guessing a specific selector/domain.
+            largest = page.evaluate(_LARGEST_IMAGE_JS)
+            if largest:
+                return largest
 
-            log.warning("Không tìm thấy ảnh sản phẩm trên trang (sau khi render) cho %s", product_url)
+            log.warning(
+                "Không tìm thấy ảnh sản phẩm trên trang (sau khi render) cho %s (tiêu đề trang: %r)",
+                product_url,
+                page.title(),
+            )
             return ""
         finally:
             page.close()
