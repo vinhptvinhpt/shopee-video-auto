@@ -121,7 +121,7 @@ class Pipeline:
             self.state.log_stage(product.link, "thumbnail", "success")
 
             search_urls = lens.search_by_image(thumb_path)
-            tiktok_urls = lens.filter_tiktok_video_links(search_urls)
+            tiktok_urls = lens.filter_tiktok_video_links(search_urls)[: self.cfg.image_search.max_results]
             if not tiktok_urls:
                 self.state.log_stage(product.link, "image_search", "failed", "no tiktok links found")
                 self.state.mark_prepare_failed(product.link)

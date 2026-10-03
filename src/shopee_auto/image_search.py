@@ -49,6 +49,15 @@ class GoogleLensSearch:
 
     def search_by_image(self, image_path: Path) -> list[str]:
         sel = self._cfg.selectors
+        # No configured selector (the common case -- Google's result-card
+        # markup/classes change often and aren't worth hand-calibrating) ->
+        # grab every link on the page. We don't know in advance which of
+        # them are real results vs. Google chrome/ads, so filtering down to
+        # TikTok video links happens afterwards in filter_tiktok_video_links,
+        # on the *unfiltered* list -- truncating here by max_results first
+        # would almost always discard the handful of TikTok links before
+        # they're even checked.
+        selector = sel.get("result_link") or "a[href]"
         page = self._context.new_page()
         try:
             page.goto(self._cfg.search_url, wait_until="networkidle")
@@ -62,14 +71,14 @@ class GoogleLensSearch:
             if page.get_by_text(re.compile("unusual traffic|captcha", re.I)).count() > 0:
                 raise CaptchaEncounteredError("Google Lens hiện captcha sau khi upload ảnh.")
 
-            links = page.locator(sel["result_link"])
-            count = min(links.count(), self._cfg.max_results)
+            links = page.locator(selector)
+            count = links.count()
             urls = []
             for i in range(count):
                 href = links.nth(i).get_attribute("href")
                 if href:
                     urls.append(href)
-            log.info("Google Lens trả về %d kết quả", len(urls))
+            log.info("Google Lens trả về %d link trên trang kết quả", len(urls))
             return urls
         finally:
             page.close()

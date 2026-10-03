@@ -80,8 +80,10 @@ def run_checks(cfg: AppConfig) -> list[CheckResult]:
         results.append(CheckResult(False, "config.phone.ui chưa có selector nào được điền"))
 
     if cfg.image_search.selectors.get("result_link"):
-        results.append(CheckResult(True, "config.image_search.selectors.result_link đã điền"))
+        results.append(CheckResult(True, "config.image_search.selectors.result_link đã điền (selector tùy chỉnh)"))
     else:
-        results.append(CheckResult(False, "config.image_search.selectors.result_link chưa được điền"))
+        results.append(
+            CheckResult(True, "config.image_search.selectors.result_link để trống -- tự dùng mọi link (a[href])")
+        )
 
     return results

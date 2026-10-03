@@ -31,6 +31,11 @@ image_search:
   headless: false
   selectors:
     file_input: "input[type='file']"
+    # Left empty on purpose: Google's result-card markup/classes change too
+    # often to hardcode, so an empty value makes the code grab every link
+    # on the results page and then keep only the ones pointing at a TikTok
+    # video -- no calibration needed. Only set this if you want to narrow
+    # the search to a specific result section yourself.
     result_link: ""
 
 tiktok:

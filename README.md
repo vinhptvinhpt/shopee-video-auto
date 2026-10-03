@@ -150,18 +150,19 @@ nữa trừ khi dùng CLI thuần:
 
 ## Calibrating selectors (bắt buộc trước khi chạy thật)
 
-Selector cho Google Lens và app Shopee trên điện thoại **không được đoán
-trước** trong repo này — vì không có tài khoản/điện thoại thật trong môi
-trường build để kiểm chứng, và Google/Shopee đổi markup định kỳ.
+Selector cho app Shopee trên điện thoại **không được đoán trước** trong
+repo này — vì không có điện thoại thật trong môi trường build để kiểm
+chứng, và Shopee đổi markup định kỳ.
 
-Bạn cần tự lấy selector thật của mình rồi điền vào `config/config.yaml`:
-
-- **Google Lens**: dùng Playwright Codegen —
+- **Google Lens**: để trống `image_search.selectors.result_link` (giá trị
+  mặc định) — code sẽ tự lấy toàn bộ link trên trang kết quả rồi lọc giữ
+  lại link TikTok video, không cần tự dò selector thủ công (markup thẻ kết
+  quả của Google đổi khá thường xuyên nên không đáng để hardcode). Chỉ cần
+  tự điền selector riêng nếu bạn muốn giới hạn tìm trong 1 khu vực kết quả
+  cụ thể — dùng Playwright Codegen để lấy:
   ```bash
   playwright codegen https://lens.google.com/upload
   ```
-  Upload thử 1 ảnh, click vào 1 kết quả, Codegen in ra CSS selector — copy
-  vào `image_search.selectors.result_link`.
 
 - **App Shopee trên điện thoại**: dùng uiautomator2 inspector —
   ```bash
