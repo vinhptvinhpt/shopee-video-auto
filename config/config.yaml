@@ -22,7 +22,7 @@ product_source:
   # are fetched through that real browser instead. See README "Thumbnail bị
   # Shopee chặn (verify/traffic/error)". Leave null to use Playwright's own
   # browser (works until/unless you hit this block).
-  cdp_endpoint: null
+  cdp_endpoint: "http://localhost:9222"
 
 image_search:
   engine: "google_lens"
