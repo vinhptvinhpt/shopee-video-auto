@@ -118,9 +118,10 @@ class ThumbnailFetcher:
     driver per thread, and prepare_videos also needs one for
     GoogleLensSearch in the same thread (see pipeline.py)."""
 
-    def __init__(self, playwright: Playwright, headless: bool = True):
+    def __init__(self, playwright: Playwright, headless: bool = True, debug_dir: Path | None = None):
         self._playwright = playwright
         self._headless = headless
+        self._debug_dir = debug_dir
         self._browser: Browser | None = None
 
     def __enter__(self) -> "ThumbnailFetcher":
@@ -154,22 +155,36 @@ class ThumbnailFetcher:
             if largest:
                 return largest
 
+            shot_note = ""
+            if self._debug_dir:
+                self._debug_dir.mkdir(parents=True, exist_ok=True)
+                shot_path = self._debug_dir / f"{_safe_filename(product_url)}.png"
+                try:
+                    page.screenshot(path=str(shot_path), full_page=False)
+                    shot_note = f" Ảnh chụp màn hình: {shot_path}"
+                except Exception:  # noqa: BLE001 - diagnostics must never break the real flow
+                    pass
             log.warning(
-                "Không tìm thấy ảnh sản phẩm trên trang (sau khi render) cho %s (tiêu đề trang: %r)",
+                "Không tìm thấy ảnh sản phẩm trên trang (sau khi render) cho %s (tiêu đề trang: %r, URL cuối: %r).%s",
                 product_url,
                 page.title(),
+                page.url,
+                shot_note,
             )
             return ""
         finally:
             page.close()
 
 
+def _safe_filename(text: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9_-]+", "_", text)[:60]
+
+
 def download_thumbnail(
     product: Product, dest_dir: Path, fetcher: ThumbnailFetcher, timeout: float = 20
 ) -> Path:
     dest_dir.mkdir(parents=True, exist_ok=True)
-    safe_name = re.sub(r"[^a-zA-Z0-9_-]+", "_", product.name)[:60]
-    dest_path = dest_dir / f"{safe_name}.jpg"
+    dest_path = dest_dir / f"{_safe_filename(product.name)}.jpg"
 
     thumbnail_url = product.thumbnail_url or fetcher.fetch_url(product.product_url, timeout=timeout)
     if not thumbnail_url:
