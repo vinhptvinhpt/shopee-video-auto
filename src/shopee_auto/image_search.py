@@ -34,14 +34,24 @@ class GoogleLensSearch:
     sync_playwright() driver per thread, and prepare_videos also needs one
     for ThumbnailFetcher in the same thread.
 
-    A Playwright-*launched* Chromium gets silently bounced by Google: the
-    goto()/upload still "succeeds" (no captcha text, no error), but the
-    page you land on is the plain google.com homepage instead of a Lens
-    results page -- same automation fingerprint check as the Shopee
-    /verify/traffic/error block elsewhere in this project, just with a
-    quieter failure mode. cdp_endpoint, when set, attaches to the same
-    real, manually-launched Chrome window used for thumbnails instead of
-    launching a separate flagged browser."""
+    cdp_endpoint, when set, attaches to the same real, manually-launched
+    Chrome window used for thumbnails (see ThumbnailFetcher) instead of
+    launching a separate Playwright-controlled browser -- this rules out
+    Google's automation-fingerprint check (confirmed elsewhere in this
+    project, e.g. Shopee's /verify/traffic/error) as a cause, independent
+    of whatever else is going on with a given result.
+
+    Observed in production logs (real runs, 2 different product images):
+    the page landed on had zero <a href> elements that were actual result
+    content -- every link was Google's own search-results-page chrome
+    (nav/footer). That is consistent with the visual-match grid being
+    rendered inside a child <iframe> that a main-frame-only query would
+    completely miss, which is why search_by_image scans every frame via
+    page.frames rather than just page.locator(). This was verified against
+    a local HTML fixture reproducing that exact shape (outer chrome +
+    iframe with the real result links) -- not yet confirmed against the
+    live google.com page, since this project's sandbox can't reach it
+    (network policy blocks google.com/lens.google.com here)."""
 
     def __init__(
         self,
@@ -112,6 +122,9 @@ class GoogleLensSearch:
             # frame). page.locator() only sees the main frame, so scan every
             # frame on the page and merge their links instead of assuming
             # everything is in the top-level document.
+            frame_urls = [f.url for f in page.frames]
+            log.info("Trang hiện tại có %d frame: %s", len(frame_urls), frame_urls)
+
             urls: list[str] = []
             for frame in page.frames:
                 try:
@@ -130,25 +143,28 @@ class GoogleLensSearch:
 
             if not any(_TIKTOK_VIDEO_RE.search(u) for u in urls):
                 # Could be a genuine "no matching TikTok video" -- or the
-                # selector/timing missed the real result grid entirely.
-                # Dump everything needed to tell the two apart without
-                # having to reproduce the run.
+                # selector/timing missed the real result grid entirely (e.g.
+                # the result is a <div onclick> with no href, or lives in a
+                # shadow root that plain HTML serialization skips). A raw
+                # text scan for the literal word "tiktok" across every
+                # frame's rendered HTML is a much lower bar than "found a
+                # clean <a href>" -- if THIS finds mentions but the
+                # structured scan above found none, that proves it's a
+                # markup-extraction problem, not a "no match" result.
+                mentions = self._raw_tiktok_mentions(page)
                 sample = urls[:40]
                 log.warning(
-                    "Không có link TikTok nào trong %d link thu được (URL hiện tại: %s). Mẫu link: %s",
+                    "Không có link TikTok (link thường) nào trong %d link thu được (URL hiện tại: %s). "
+                    "Quét thô chữ 'tiktok' trong HTML: tìm thấy %d lần. Mẫu link: %s",
                     len(urls),
                     page.url,
+                    len(mentions),
                     sample,
                 )
-                if self._debug_dir:
-                    self._debug_dir.mkdir(parents=True, exist_ok=True)
-                    stem = image_path.stem
-                    try:
-                        page.screenshot(path=str(self._debug_dir / f"{stem}_lens.png"), full_page=True)
-                        (self._debug_dir / f"{stem}_lens.html").write_text(page.content(), encoding="utf-8")
-                        log.info("Đã lưu debug: %s_lens.png / .html trong %s", stem, self._debug_dir)
-                    except Exception:  # noqa: BLE001 - debug capture is best-effort
-                        log.exception("Không lưu được debug screenshot/html cho Google Lens")
+                for snippet in mentions[:8]:
+                    log.warning("  -> %s", snippet)
+
+                self._dump_debug(page, image_path)
 
             return urls
         finally:
@@ -196,6 +212,49 @@ class GoogleLensSearch:
             "Không tìm được ô nhập từ khoá trên trang Lens để gõ '%s' -- tiếp tục chỉ tìm bằng ảnh.",
             self._cfg.keyword,
         )
+
+    @staticmethod
+    def _raw_tiktok_mentions(page) -> list[str]:
+        """Every occurrence of the literal text "tiktok" across every
+        frame's rendered HTML, each with ~120 chars of surrounding context.
+        Deliberately not limited to <a href> values -- this is a sanity
+        check for whether the word appears ANYWHERE in the DOM at all, to
+        tell a genuine "no match" apart from a markup-extraction miss."""
+        mentions: list[str] = []
+        for frame in page.frames:
+            try:
+                content = frame.content()
+            except Exception:  # noqa: BLE001 - detached/cross-origin frame
+                continue
+            for m in re.finditer("tiktok", content, re.I):
+                start = max(0, m.start() - 60)
+                end = min(len(content), m.end() + 60)
+                snippet = " ".join(content[start:end].split())
+                mentions.append(f"[{frame.url}] ...{snippet}...")
+        return mentions
+
+    def _dump_debug(self, page, image_path: Path) -> None:
+        """Best-effort: full-page screenshot plus each frame's HTML saved
+        separately (frame content isn't included in the main page's
+        page.content(), so a single dump would miss iframe content)."""
+        if not self._debug_dir:
+            return
+        self._debug_dir.mkdir(parents=True, exist_ok=True)
+        stem = image_path.stem
+        try:
+            page.screenshot(path=str(self._debug_dir / f"{stem}_lens.png"), full_page=True)
+        except Exception:  # noqa: BLE001
+            log.exception("Không lưu được debug screenshot cho Google Lens")
+        for i, frame in enumerate(page.frames):
+            try:
+                content = frame.content()
+            except Exception:  # noqa: BLE001
+                continue
+            try:
+                (self._debug_dir / f"{stem}_lens_frame{i}.html").write_text(content, encoding="utf-8")
+            except Exception:  # noqa: BLE001
+                log.exception("Không lưu được debug HTML frame %d cho Google Lens", i)
+        log.info("Đã lưu debug: %s_lens.png + %d file HTML frame trong %s", stem, len(page.frames), self._debug_dir)
 
     @staticmethod
     def filter_tiktok_video_links(urls: list[str]) -> list[str]:
