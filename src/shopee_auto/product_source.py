@@ -27,7 +27,11 @@ _USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 )
-_OG_IMAGE_RE = re.compile(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']', re.I)
+_META_TAG_RE = re.compile(r"<meta\b([^>]+)>", re.I)
+_ATTR_RE = re.compile(r'([\w:-]+)\s*=\s*"([^"]*)"|([\w:-]+)\s*=\s*\'([^\']*)\'', re.I)
+# Checked in this order -- og:image is standard, but some pages only carry
+# the twitter/itemprop variants.
+_IMAGE_META_KEYS = ("og:image:secure_url", "og:image", "twitter:image", "image")
 
 
 @dataclasses.dataclass
@@ -77,12 +81,43 @@ def load_products_from_file(path: Path, min_sales: int) -> list[Product]:
     return products
 
 
+def _extract_meta_image(html: str) -> str:
+    """Pull an image URL out of the page's <meta> tags regardless of
+    attribute order (some pages emit content="..." before property="...",
+    which a property-then-content regex silently misses)."""
+    candidates: dict[str, str] = {}
+    for tag_match in _META_TAG_RE.finditer(html):
+        attrs: dict[str, str] = {}
+        for m in _ATTR_RE.finditer(tag_match.group(1)):
+            key = (m.group(1) or m.group(3)).lower()
+            value = m.group(2) if m.group(1) else m.group(4)
+            attrs[key] = value
+        key = (attrs.get("property") or attrs.get("name") or attrs.get("itemprop") or "").lower()
+        if key and attrs.get("content"):
+            candidates[key] = attrs["content"]
+    for key in _IMAGE_META_KEYS:
+        if candidates.get(key):
+            return candidates[key]
+    return ""
+
+
 def fetch_thumbnail_url(product_url: str, timeout: float = 15) -> str:
-    request = urllib.request.Request(product_url, headers={"User-Agent": _USER_AGENT})
+    request = urllib.request.Request(
+        product_url, headers={"User-Agent": _USER_AGENT, "Accept-Language": "vi-VN,vi;q=0.9,en;q=0.8"}
+    )
     with urllib.request.urlopen(request, timeout=timeout) as response:
+        status = response.status
         html = response.read().decode("utf-8", errors="ignore")
-    match = _OG_IMAGE_RE.search(html)
-    return match.group(1) if match else ""
+    image = _extract_meta_image(html)
+    if not image:
+        log.warning(
+            "Không tìm thấy ảnh trong <meta> của %s (HTTP %s, HTML dài %d ký tự). Đoạn đầu trang: %r",
+            product_url,
+            status,
+            len(html),
+            html[:500],
+        )
+    return image
 
 
 def download_thumbnail(product: Product, dest_dir: Path, timeout: float = 15) -> Path:
