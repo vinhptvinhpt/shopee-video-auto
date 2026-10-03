@@ -95,7 +95,16 @@
   .badge.posted { background: var(--ok-bg); color: var(--ok); }
   .badge.prepare_failed, .badge.post_failed { background: var(--err-bg); color: var(--err); }
   .badge.skipped { background: var(--warn-bg); color: var(--warn); }
+  .badge.preparing, .badge.posting { background: var(--warn-bg); color: var(--warn); }
+  .badge.preparing::before, .badge.posting::before {
+    content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+    background: var(--warn); margin-right: 5px; animation: pulse 1s ease-in-out infinite;
+  }
+  @keyframes pulse { 50% { opacity: .3; } }
   .empty { color: var(--muted); font-size: 13px; padding: 10px 0; }
+  th.ck, td.ck { width: 28px; padding-right: 0; }
+  .sel-bar { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); margin-bottom: 10px; }
+  .sel-bar button { background: none; border: none; color: var(--accent); cursor: pointer; font-size: 12px; padding: 0; }
 
   .config-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px 20px; font-size: 13px; }
   .config-grid dt { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .03em; }
@@ -149,12 +158,12 @@
       </div>
       <div class="action-card">
         <h3>🔍 Tìm &amp; tải video</h3>
-        <p>Với mỗi sản phẩm đang chờ: tìm clip TikTok khớp ảnh sản phẩm và tải về (không đụng điện thoại).</p>
+        <p>Tích chọn sản phẩm bên dưới rồi chạy theo đợt nhỏ để tránh bị chặn/captcha — hoặc chạy tất cả nếu đã yên tâm.</p>
         <button class="btn btn-primary" id="btn-prepare">Chạy tìm &amp; tải video</button>
       </div>
       <div class="action-card">
         <h3>📤 Đăng video</h3>
-        <p>Đăng các video đã sẵn sàng lên Shopee qua điện thoại, gắn giỏ hàng, xác nhận.</p>
+        <p>Tích chọn video đã sẵn sàng bên dưới để đăng, hoặc đăng hết phần còn lại trong chỉ tiêu hôm nay.</p>
         <button class="btn btn-primary" id="btn-post">Chạy đăng bài</button>
       </div>
     </div>
@@ -166,11 +175,17 @@
     <div class="tabs" id="tabs">
       <div class="tab active" data-status="">Tất cả</div>
       <div class="tab" data-status="pending">Chờ chuẩn bị</div>
+      <div class="tab" data-status="preparing">Đang tìm video</div>
       <div class="tab" data-status="video_ready">Sẵn sàng đăng</div>
+      <div class="tab" data-status="posting">Đang đăng</div>
       <div class="tab" data-status="posted">Đã đăng</div>
       <div class="tab" data-status="prepare_failed">Lỗi chuẩn bị</div>
       <div class="tab" data-status="post_failed">Lỗi đăng</div>
       <div class="tab" data-status="skipped">Đã bỏ qua</div>
+    </div>
+    <div class="sel-bar" id="sel-bar" style="display:none">
+      <span id="sel-text"></span>
+      <button id="sel-clear">Bỏ chọn</button>
     </div>
     <div id="queue-table"></div>
   </div>
@@ -197,6 +212,8 @@
 const $ = (sel) => document.querySelector(sel);
 let currentTab = "";
 let jobPollTimer = null;
+const selected = new Set();       // links the user ticked, across tab switches
+const queueByLink = new Map();    // link -> latest known item (status etc.)
 
 function toast(msg) {
   const el = $("#toast");
@@ -214,7 +231,8 @@ async function api(path, opts) {
 
 function fmtStatus(s) {
   const map = {
-    pending: "Chờ chuẩn bị", video_ready: "Sẵn sàng đăng", posted: "Đã đăng",
+    pending: "Chờ chuẩn bị", preparing: "Đang tìm video", video_ready: "Sẵn sàng đăng",
+    posting: "Đang đăng", posted: "Đã đăng",
     prepare_failed: "Lỗi chuẩn bị", post_failed: "Lỗi đăng", skipped: "Đã bỏ qua",
   };
   return map[s] || s;
@@ -234,6 +252,7 @@ async function refreshStatus() {
 
   updateJobUI(data.job);
   setButtonsDisabled(data.job.running);
+  return data.job;
 }
 
 function setButtonsDisabled(disabled) {
@@ -276,16 +295,14 @@ function reportSummary(kind, s) {
 
 async function pollJob() {
   try {
-    const job = await api("/api/job");
-    updateJobUI(job);
-    setButtonsDisabled(job.running);
-    if (!job.running) await refreshStatus();
+    const job = await refreshStatus();
+    if (job.running) await loadQueue();  // live pending -> preparing/posting -> done transitions
   } catch (e) { /* ignore transient poll errors */ }
 }
 
-async function runAction(path, btnId) {
+async function runJob(path, body) {
   try {
-    await api(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    await api(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
     setButtonsDisabled(true);
     pollJob();
   } catch (e) {
@@ -293,15 +310,52 @@ async function runAction(path, btnId) {
   }
 }
 
+function runPrepare() {
+  const picked = [...selected].filter((l) => queueByLink.get(l)?.status === "pending");
+  if (picked.length) { runJob("/api/prepare", { links: picked }); return; }
+  const totalPending = Number($("#c-pending").textContent) || 0;
+  if (totalPending === 0) { toast("Không có sản phẩm nào đang chờ."); return; }
+  if (!confirm(`Chưa chọn sản phẩm nào — chạy cho TẤT CẢ ${totalPending} sản phẩm đang chờ?\nSố lượng lớn có thể dễ bị chặn/captcha hơn, cân nhắc chọn từng phần trước.`)) return;
+  runJob("/api/prepare", {});
+}
+
+function runPost() {
+  const picked = [...selected].filter((l) => queueByLink.get(l)?.status === "video_ready");
+  if (picked.length) { runJob("/api/post", { links: picked }); return; }
+  const remaining = Number($("#c-target").textContent) - Number($("#c-posted").textContent) || 0;
+  if (remaining <= 0) { toast("Đã đạt chỉ tiêu hôm nay."); return; }
+  if (!confirm(`Chưa chọn video nào — đăng hết phần còn lại hôm nay (tối đa ${remaining} video)?`)) return;
+  runJob("/api/post", {});
+}
+
+const SELECTABLE = new Set(["pending", "video_ready"]);
+let currentItems = [];
+
 async function loadQueue() {
-  const items = await api("/api/queue?status=" + encodeURIComponent(currentTab) + "&limit=200");
+  currentItems = await api("/api/queue?status=" + encodeURIComponent(currentTab) + "&limit=200");
+  currentItems.forEach((it) => queueByLink.set(it.link, it));
+  // drop selected links that no longer exist / are no longer selectable, so
+  // stale picks (e.g. already processed by a previous job) don't linger
+  for (const link of [...selected]) {
+    const it = queueByLink.get(link);
+    if (!it || !SELECTABLE.has(it.status)) selected.delete(link);
+  }
+  renderQueueTable();
+  updateSelBar();
+  updateActionLabels();
+}
+
+function renderQueueTable() {
   const box = $("#queue-table");
-  $("#queue-count-sub").textContent = items.length + " dòng";
-  if (!items.length) {
+  $("#queue-count-sub").textContent = currentItems.length + " dòng";
+  if (!currentItems.length) {
     box.innerHTML = '<div class="empty">Không có sản phẩm nào.</div>';
     return;
   }
-  const rows = items.map((it) => {
+  const selectableVisible = currentItems.filter((it) => SELECTABLE.has(it.status));
+  const allChecked = selectableVisible.length > 0 && selectableVisible.every((it) => selected.has(it.link));
+
+  const rows = currentItems.map((it) => {
     const actions = [];
     if (["pending", "prepare_failed", "post_failed"].includes(it.status)) {
       actions.push(`<button class="btn btn-sm btn-danger-ghost" data-act="skip" data-link="${esc(it.link)}">Bỏ qua</button>`);
@@ -310,14 +364,41 @@ async function loadQueue() {
       actions.push(`<button class="btn btn-sm" data-act="requeue" data-link="${esc(it.link)}">Thử lại</button>`);
     }
     const sales = it.sales_count ? it.sales_count.toLocaleString("vi-VN") : "–";
+    const ck = SELECTABLE.has(it.status)
+      ? `<input type="checkbox" data-link="${esc(it.link)}" ${selected.has(it.link) ? "checked" : ""}>`
+      : "";
     return `<tr>
+      <td class="ck">${ck}</td>
       <td class="name">${esc(it.name)}</td>
       <td>${sales}</td>
       <td><span class="badge ${it.status}">${fmtStatus(it.status)}</span></td>
       <td>${actions.join(" ")}</td>
     </tr>`;
   }).join("");
-  box.innerHTML = `<table><thead><tr><th>Sản phẩm</th><th>Lượt bán</th><th>Trạng thái</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+  box.innerHTML = `<table><thead><tr>
+      <th class="ck"><input type="checkbox" id="ck-all" ${allChecked ? "checked" : ""}></th>
+      <th>Sản phẩm</th><th>Lượt bán</th><th>Trạng thái</th><th></th>
+    </tr></thead><tbody>${rows}</tbody></table>`;
+
+  box.querySelectorAll("input[type=checkbox][data-link]").forEach((ck) => {
+    ck.addEventListener("change", () => {
+      if (ck.checked) selected.add(ck.dataset.link); else selected.delete(ck.dataset.link);
+      updateSelBar();
+      updateActionLabels();
+      const allBox = $("#ck-all");
+      if (allBox) allBox.checked = selectableVisible.every((it) => selected.has(it.link));
+    });
+  });
+  const ckAll = $("#ck-all");
+  if (ckAll) {
+    ckAll.addEventListener("change", () => {
+      selectableVisible.forEach((it) => { ckAll.checked ? selected.add(it.link) : selected.delete(it.link); });
+      renderQueueTable();
+      updateSelBar();
+      updateActionLabels();
+    });
+  }
+
   box.querySelectorAll("button[data-act]").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const link = btn.dataset.link;
@@ -326,11 +407,30 @@ async function loadQueue() {
         await api(`/api/queue/${act}`, {
           method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ link }),
         });
+        selected.delete(link);
         await loadQueue();
         await refreshStatus();
       } catch (e) { toast("Lỗi: " + e.message); }
     });
   });
+}
+
+function updateSelBar() {
+  const bar = $("#sel-bar");
+  if (!selected.size) { bar.style.display = "none"; return; }
+  bar.style.display = "flex";
+  $("#sel-text").textContent = `Đã chọn ${selected.size} sản phẩm`;
+}
+
+function updateActionLabels() {
+  const pendingPicked = [...selected].filter((l) => queueByLink.get(l)?.status === "pending").length;
+  const readyPicked = [...selected].filter((l) => queueByLink.get(l)?.status === "video_ready").length;
+  $("#btn-prepare").textContent = pendingPicked
+    ? `Chạy tìm & tải video (${pendingPicked} đã chọn)`
+    : "Chạy tìm & tải video";
+  $("#btn-post").textContent = readyPicked
+    ? `Chạy đăng bài (${readyPicked} đã chọn)`
+    : "Chạy đăng bài";
 }
 
 function esc(s) {
@@ -381,11 +481,12 @@ $("#tabs").addEventListener("click", (e) => {
   loadQueue();
 });
 
-$("#btn-scan").addEventListener("click", () => runAction("/api/scan"));
-$("#btn-prepare").addEventListener("click", () => runAction("/api/prepare"));
-$("#btn-post").addEventListener("click", () => runAction("/api/post"));
+$("#btn-scan").addEventListener("click", () => runJob("/api/scan"));
+$("#btn-prepare").addEventListener("click", runPrepare);
+$("#btn-post").addEventListener("click", runPost);
 $("#btn-refresh").addEventListener("click", refreshAll);
 $("#btn-check").addEventListener("click", runCheck);
+$("#sel-clear").addEventListener("click", () => { selected.clear(); updateSelBar(); renderQueueTable(); });
 
 refreshAll();
 setInterval(refreshStatus, 5000);

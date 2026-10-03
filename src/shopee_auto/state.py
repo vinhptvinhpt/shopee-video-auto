@@ -179,6 +179,15 @@ class StateStore:
             for r in rows
         ]
 
+    def mark_preparing(self, product_link: str) -> None:
+        """Transient status set the instant work starts on an item, so the
+        dashboard can show "đang tìm video" instead of jumping straight
+        from pending to the final outcome."""
+        self._conn.execute(
+            "UPDATE product_queue SET status = 'preparing' WHERE product_link = ?", (product_link,)
+        )
+        self._conn.commit()
+
     def mark_video_ready(self, product_link: str, video_path: str, tiktok_source_url: str) -> None:
         now = dt.datetime.now(dt.timezone.utc).isoformat()
         self._conn.execute(
@@ -205,6 +214,14 @@ class StateStore:
         ).fetchall()
         return [_row_to_item(r) for r in rows]
 
+    def mark_posting(self, product_link: str) -> None:
+        """Transient status set the instant the phone starts working on an
+        item, so the dashboard can show "đang đăng" while it's in progress."""
+        self._conn.execute(
+            "UPDATE product_queue SET status = 'posting' WHERE product_link = ?", (product_link,)
+        )
+        self._conn.commit()
+
     def mark_posted(self, product_link: str, status: str) -> None:
         """status is 'posted' or 'post_failed'."""
         now = dt.datetime.now(dt.timezone.utc).isoformat()
@@ -221,6 +238,20 @@ class StateStore:
             (f"{today}%",),
         ).fetchone()
         return row[0] if row else 0
+
+    def get_queue_items_by_links(self, links: list[str], required_status: str) -> list[QueueItem]:
+        """Fetch specific queue items the dashboard's checkboxes selected,
+        restricted to required_status so an item that moved on since the
+        checkbox was ticked (already being processed, or finished) is
+        silently skipped instead of reprocessed."""
+        if not links:
+            return []
+        placeholders = ",".join("?" for _ in links)
+        rows = self._conn.execute(
+            f"SELECT * FROM product_queue WHERE status = ? AND product_link IN ({placeholders})",
+            (required_status, *links),
+        ).fetchall()
+        return [_row_to_item(r) for r in rows]
 
     # -- queue: management / dashboard ----------------------------------
 

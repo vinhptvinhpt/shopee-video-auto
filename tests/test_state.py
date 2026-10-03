@@ -77,6 +77,42 @@ def test_prepare_then_post_lifecycle(store: StateStore) -> None:
     assert store.count_posted_today() == 1
 
 
+def test_mark_preparing_is_visible_before_outcome(store: StateStore) -> None:
+    store.enqueue_products(_products(1))
+    [p] = store.get_pending_for_prepare(1)
+    store.mark_preparing(p.link)
+    assert store.count_by_status() == {"preparing": 1}
+    store.mark_video_ready(p.link, "/tmp/v.mp4", "https://tiktok.com/x")
+    assert store.count_by_status() == {"video_ready": 1}
+
+
+def test_mark_posting_is_visible_before_outcome(store: StateStore) -> None:
+    store.enqueue_products(_products(1))
+    [p] = store.get_pending_for_prepare(1)
+    store.mark_video_ready(p.link, "/tmp/v.mp4", "https://tiktok.com/x")
+    store.mark_posting(p.link)
+    assert store.count_by_status() == {"posting": 1}
+    store.mark_posted(p.link, "posted")
+    assert store.count_by_status() == {"posted": 1}
+
+
+def test_get_queue_items_by_links_filters_by_status_and_selection(store: StateStore) -> None:
+    store.enqueue_products(_products(5))
+    items = store.get_pending_for_prepare()
+    picked_links = [items[0].link, items[2].link]
+
+    selected = store.get_queue_items_by_links(picked_links, "pending")
+    assert {i.product.link for i in selected} == set(picked_links)
+
+    # an item not in the required status is silently excluded
+    store.mark_prepare_failed(items[0].link)
+    selected2 = store.get_queue_items_by_links(picked_links, "pending")
+    assert {i.product.link for i in selected2} == {items[2].link}
+
+    # empty selection -> empty result, no error
+    assert store.get_queue_items_by_links([], "pending") == []
+
+
 def test_prepare_failed_item_does_not_become_ready(store: StateStore) -> None:
     store.enqueue_products(_products(1))
     [p] = store.get_pending_for_prepare(1)

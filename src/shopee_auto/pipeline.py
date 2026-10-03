@@ -78,9 +78,16 @@ class Pipeline:
 
     # -- phase 1: find + download a TikTok clip for each pending product --
 
-    def prepare_videos(self, limit: int | None = None) -> list[PrepareResult]:
+    def prepare_videos(
+        self, limit: int | None = None, links: list[str] | None = None
+    ) -> list[PrepareResult]:
+        """links, when given, restricts work to exactly those products
+        (dashboard checkbox selection) instead of draining the queue."""
         self.import_new_csvs()
-        candidates = self.state.get_pending_for_prepare(limit)
+        if links:
+            candidates = [item.product for item in self.state.get_queue_items_by_links(links, "pending")]
+        else:
+            candidates = self.state.get_pending_for_prepare(limit)
         if not candidates:
             log.info("Không có sản phẩm nào đang chờ chuẩn bị video.")
             return []
@@ -97,6 +104,7 @@ class Pipeline:
 
     def _prepare_one(self, product: Product, lens: GoogleLensSearch) -> PrepareResult:
         log.info("=== Chuẩn bị video cho: %s ===", product.name)
+        self.state.mark_preparing(product.link)
         try:
             thumb_path = product_source.download_thumbnail(
                 product, self.cfg.tiktok.download_dir / "thumbnails"
@@ -135,7 +143,12 @@ class Pipeline:
 
     # -- phase 2: publish already-prepared videos on the phone -----------
 
-    def post_ready(self, max_videos: int | None = None) -> list[CycleResult]:
+    def post_ready(
+        self, max_videos: int | None = None, links: list[str] | None = None
+    ) -> list[CycleResult]:
+        """links, when given, restricts work to exactly those products
+        (dashboard checkbox selection), still capped by the day's
+        remaining quota so manual selection can't exceed daily_target."""
         remaining = self.cfg.daily_target - self.state.count_posted_today()
         if max_videos is not None:
             remaining = min(remaining, max_videos)
@@ -143,7 +156,10 @@ class Pipeline:
             log.info("Đã đạt chỉ tiêu %d video hôm nay, dừng.", self.cfg.daily_target)
             return []
 
-        candidates = self.state.get_ready_to_post(remaining)
+        if links:
+            candidates = self.state.get_queue_items_by_links(links[:remaining], "video_ready")
+        else:
+            candidates = self.state.get_ready_to_post(remaining)
         if not candidates:
             log.info("Không có video nào sẵn sàng để đăng -- chạy \"Tìm & tải video\" trước.")
             return []
@@ -162,6 +178,7 @@ class Pipeline:
     def _post_one(self, item: QueueItem, phone: PhoneController) -> CycleResult:
         product = item.product
         log.info("=== Đăng bài: %s ===", product.name)
+        self.state.mark_posting(product.link)
         try:
             phone.push_video(Path(item.video_path))
             phone.open_shopee_app()

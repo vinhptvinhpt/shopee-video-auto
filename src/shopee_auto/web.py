@@ -145,12 +145,14 @@ def create_app(cfg: AppConfig) -> Flask:
 
     @app.post("/api/prepare")
     def prepare():
-        limit = (request.get_json(silent=True) or {}).get("limit")
+        body = request.get_json(silent=True) or {}
+        limit = body.get("limit")
+        links = body.get("links")  # dashboard checkbox selection, overrides limit when given
 
         def task():
             p = pipeline()
             try:
-                results = p.prepare_videos(limit=limit)
+                results = p.prepare_videos(limit=limit, links=links)
             finally:
                 p.close()
             ready = sum(1 for r in results if r.status == "ready")
@@ -167,12 +169,14 @@ def create_app(cfg: AppConfig) -> Flask:
 
     @app.post("/api/post")
     def post():
-        limit = (request.get_json(silent=True) or {}).get("limit")
+        body = request.get_json(silent=True) or {}
+        limit = body.get("limit")
+        links = body.get("links")  # dashboard checkbox selection, overrides limit when given
 
         def task():
             p = pipeline()
             try:
-                results = p.post_ready(max_videos=limit)
+                results = p.post_ready(max_videos=limit, links=links)
             finally:
                 p.close()
             success = sum(1 for r in results if r.status == "success")

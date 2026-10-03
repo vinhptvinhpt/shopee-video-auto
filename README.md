@@ -199,7 +199,17 @@ Trang gồm:
 - **Bảng quản lý hàng đợi**: lọc theo trạng thái, mỗi dòng có thể **Bỏ qua**
   (loại hẳn khỏi hàng đợi, ví dụ không muốn affiliate sản phẩm đó nữa) hoặc
   **Thử lại** (đưa về `pending` để chuẩn bị lại từ đầu, dùng cho sản phẩm bị
-  lỗi).
+  lỗi). Mỗi dòng ở trạng thái "chờ chuẩn bị"/"sẵn sàng đăng" có checkbox —
+  tích **1, nhiều, hoặc dùng checkbox ở đầu bảng để chọn tất cả**, rồi 2 nút
+  "Tìm & tải video"/"Đăng video" sẽ chỉ chạy đúng những sản phẩm đã chọn
+  (hiện số lượng ngay trên nút). Không chọn gì mà vẫn bấm nút sẽ hỏi xác
+  nhận trước khi chạy cho toàn bộ — tiện để test thử vài sản phẩm nhỏ trước
+  khi tin tưởng chạy hàng loạt (giảm rủi ro bị chặn/captcha khi test).
+- **Trạng thái tức thời**: khi đang chạy, từng sản phẩm tự chuyển qua
+  `Chờ chuẩn bị → Đang tìm video → Sẵn sàng đăng` (hoặc
+  `Sẵn sàng đăng → Đang đăng → Đã đăng`) ngay trong bảng, cập nhật trực
+  tiếp theo thời gian thực trong lúc job chạy, không phải đợi xong cả đợt
+  mới biết.
 - **Cấu hình/tài nguyên**: xem nhanh `daily_target`, thư mục CSV, ngưỡng lọc,
   gói app Shopee, số selector điện thoại đã điền — không cần mở `config.yaml`.
 - **Kiểm tra môi trường**: tương đương `check-setup`, bấm 1 nút xem ngay.
