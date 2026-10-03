@@ -265,16 +265,38 @@ class StateStore:
         rows = self._conn.execute("SELECT status, COUNT(*) AS n FROM product_queue GROUP BY status").fetchall()
         return {r["status"]: r["n"] for r in rows}
 
-    def list_queue(self, status: str | None = None, limit: int = 100) -> list[QueueItem]:
+    def list_queue(
+        self,
+        status: str | None = None,
+        search: str | None = None,
+        min_sales: int | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> tuple[list[QueueItem], int]:
+        """Returns (items for this page, total matching rows) so the
+        dashboard can paginate instead of loading the whole queue at once."""
+        where: list[str] = []
+        params: list = []
         if status:
-            rows = self._conn.execute(
-                "SELECT * FROM product_queue WHERE status = ? ORDER BY id DESC LIMIT ?", (status, limit)
-            ).fetchall()
-        else:
-            rows = self._conn.execute(
-                "SELECT * FROM product_queue ORDER BY id DESC LIMIT ?", (limit,)
-            ).fetchall()
-        return [_row_to_item(r) for r in rows]
+            where.append("status = ?")
+            params.append(status)
+        if search:
+            where.append("product_name LIKE ? ESCAPE '\\'")
+            escaped = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            params.append(f"%{escaped}%")
+        if min_sales:
+            where.append("sales_count >= ?")
+            params.append(min_sales)
+        clause = f"WHERE {' AND '.join(where)}" if where else ""
+
+        total = self._conn.execute(
+            f"SELECT COUNT(*) FROM product_queue {clause}", params
+        ).fetchone()[0]
+        rows = self._conn.execute(
+            f"SELECT * FROM product_queue {clause} ORDER BY id DESC LIMIT ? OFFSET ?",
+            (*params, limit, offset),
+        ).fetchall()
+        return [_row_to_item(r) for r in rows], total
 
     def skip_queue_item(self, product_link: str) -> bool:
         """Manually pull an item out of the pool run_daily/prepare/post

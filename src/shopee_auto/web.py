@@ -208,26 +208,37 @@ def create_app(cfg: AppConfig) -> Flask:
     @app.get("/api/queue")
     def queue():
         status_filter = request.args.get("status") or None
-        limit = int(request.args.get("limit", 100))
+        search = request.args.get("search") or None
+        min_sales_arg = request.args.get("min_sales")
+        min_sales = int(min_sales_arg) if min_sales_arg else None
+        limit = int(request.args.get("limit", 20))
+        offset = int(request.args.get("offset", 0))
         p = pipeline()
         try:
-            items = p.state.list_queue(status=status_filter, limit=limit)
+            items, total = p.state.list_queue(
+                status=status_filter, search=search, min_sales=min_sales, limit=limit, offset=offset
+            )
         finally:
             p.close()
         return jsonify(
-            [
-                {
-                    "name": it.product.name,
-                    "link": it.product.link,
-                    "product_url": it.product.product_url,
-                    "sales_count": it.product.sales_count,
-                    "status": it.status,
-                    "video_path": it.video_path,
-                    "tiktok_source_url": it.tiktok_source_url,
-                    "queued_at": it.queued_at,
-                }
-                for it in items
-            ]
+            {
+                "items": [
+                    {
+                        "name": it.product.name,
+                        "link": it.product.link,
+                        "product_url": it.product.product_url,
+                        "sales_count": it.product.sales_count,
+                        "status": it.status,
+                        "video_path": it.video_path,
+                        "tiktok_source_url": it.tiktok_source_url,
+                        "queued_at": it.queued_at,
+                    }
+                    for it in items
+                ],
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+            }
         )
 
     @app.post("/api/queue/skip")

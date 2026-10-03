@@ -85,6 +85,24 @@
   }
   .tab.active { background: var(--text); color: #fff; border-color: var(--text); }
 
+  .filter-row { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+  .filter-row input {
+    border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; font-size: 13px;
+    background: #fff; color: var(--text);
+  }
+  .filter-row input[type="search"] { flex: 1; min-width: 180px; }
+  .filter-row input[type="number"] { width: 160px; }
+
+  .pager {
+    display: flex; align-items: center; justify-content: flex-end; gap: 10px;
+    margin-top: 12px; font-size: 12px; color: var(--muted);
+  }
+  .pager button {
+    border: 1px solid var(--border); background: #fff; border-radius: 6px; padding: 4px 10px;
+    font-size: 12px; cursor: pointer; color: var(--text);
+  }
+  .pager button:disabled { opacity: .4; cursor: not-allowed; }
+
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   th, td { text-align: left; padding: 8px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
   th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .03em; }
@@ -225,11 +243,17 @@
       <div class="tab" data-status="post_failed">Lỗi đăng</div>
       <div class="tab" data-status="skipped">Đã bỏ qua</div>
     </div>
+    <div class="filter-row">
+      <input type="search" id="q-search" placeholder="Tìm theo tên sản phẩm…">
+      <input type="number" id="q-min-sales" placeholder="Lượt bán tối thiểu" min="0" step="1000">
+      <button class="btn btn-sm" id="q-clear-filters">Xóa lọc</button>
+    </div>
     <div class="sel-bar" id="sel-bar" style="display:none">
       <span id="sel-text"></span>
       <button id="sel-clear">Bỏ chọn</button>
     </div>
     <div id="queue-table"></div>
+    <div class="pager" id="pager"></div>
   </div>
 
   <div class="panel">
@@ -257,6 +281,12 @@ let jobPollTimer = null;
 const selected = new Set();       // links the user ticked, across tab switches
 const queueByLink = new Map();    // link -> latest known item (status etc.)
 let chromeStatus = { configured: false, connected: false };
+let searchTerm = "";
+let minSalesFilter = null;
+let pageOffset = 0;
+const PAGE_SIZE = 20;
+let totalItems = 0;
+let searchDebounceTimer = null;
 
 function toast(msg) {
   const el = $("#toast");
@@ -378,7 +408,17 @@ const SELECTABLE = new Set(["pending", "video_ready"]);
 let currentItems = [];
 
 async function loadQueue() {
-  currentItems = await api("/api/queue?status=" + encodeURIComponent(currentTab) + "&limit=200");
+  const params = new URLSearchParams({
+    status: currentTab,
+    limit: PAGE_SIZE,
+    offset: pageOffset,
+  });
+  if (searchTerm) params.set("search", searchTerm);
+  if (minSalesFilter) params.set("min_sales", minSalesFilter);
+
+  const data = await api("/api/queue?" + params.toString());
+  currentItems = data.items;
+  totalItems = data.total;
   currentItems.forEach((it) => queueByLink.set(it.link, it));
   // drop selected links that no longer exist / are no longer selectable, so
   // stale picks (e.g. already processed by a previous job) don't linger
@@ -387,13 +427,28 @@ async function loadQueue() {
     if (!it || !SELECTABLE.has(it.status)) selected.delete(link);
   }
   renderQueueTable();
+  renderPager();
   updateSelBar();
   updateActionLabels();
 }
 
+function renderPager() {
+  const pager = $("#pager");
+  const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
+  const currentPage = Math.floor(pageOffset / PAGE_SIZE) + 1;
+  if (totalItems === 0) { pager.innerHTML = ""; return; }
+  pager.innerHTML = `
+    <span>Trang ${currentPage}/${totalPages} (tổng ${totalItems} sản phẩm)</span>
+    <button id="pg-prev" ${pageOffset === 0 ? "disabled" : ""}>‹ Trước</button>
+    <button id="pg-next" ${pageOffset + PAGE_SIZE >= totalItems ? "disabled" : ""}>Sau ›</button>
+  `;
+  $("#pg-prev")?.addEventListener("click", () => { pageOffset = Math.max(0, pageOffset - PAGE_SIZE); loadQueue(); });
+  $("#pg-next")?.addEventListener("click", () => { pageOffset += PAGE_SIZE; loadQueue(); });
+}
+
 function renderQueueTable() {
   const box = $("#queue-table");
-  $("#queue-count-sub").textContent = currentItems.length + " dòng";
+  $("#queue-count-sub").textContent = totalItems + " sản phẩm";
   if (!currentItems.length) {
     box.innerHTML = '<div class="empty">Không có sản phẩm nào.</div>';
     return;
@@ -564,6 +619,34 @@ $("#tabs").addEventListener("click", (e) => {
   document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
   tab.classList.add("active");
   currentTab = tab.dataset.status;
+  pageOffset = 0;
+  loadQueue();
+});
+
+$("#q-search").addEventListener("input", (e) => {
+  clearTimeout(searchDebounceTimer);
+  const value = e.target.value.trim();
+  searchDebounceTimer = setTimeout(() => {
+    searchTerm = value;
+    pageOffset = 0;
+    loadQueue();
+  }, 300);
+});
+$("#q-min-sales").addEventListener("input", (e) => {
+  clearTimeout(searchDebounceTimer);
+  const value = e.target.value;
+  searchDebounceTimer = setTimeout(() => {
+    minSalesFilter = value ? Number(value) : null;
+    pageOffset = 0;
+    loadQueue();
+  }, 300);
+});
+$("#q-clear-filters").addEventListener("click", () => {
+  $("#q-search").value = "";
+  $("#q-min-sales").value = "";
+  searchTerm = "";
+  minSalesFilter = null;
+  pageOffset = 0;
   loadQueue();
 });
 

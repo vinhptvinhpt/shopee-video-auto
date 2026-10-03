@@ -234,7 +234,11 @@ Trang gồm:
   video (giai đoạn 2) — mỗi nút chạy nền, có log trực tiếp ngay bên dưới,
   và tự khóa các nút khác lại trong lúc chạy (không chạy 2 việc cùng lúc
   tranh nhau điện thoại/trình duyệt).
-- **Bảng quản lý hàng đợi**: lọc theo trạng thái, mỗi dòng có thể **Bỏ qua**
+- **Bảng quản lý hàng đợi**: lọc theo trạng thái (tab), theo tên sản phẩm
+  (ô tìm kiếm, không phân biệt hoa/thường, gõ là tự lọc sau 300ms) và theo
+  lượt bán tối thiểu, có **phân trang** (20 sản phẩm/trang, nút Trước/Sau +
+  tổng số trang) để bảng không bị tải hết hàng nghìn dòng một lúc — đổi tab
+  hoặc đổi bộ lọc sẽ tự quay về trang 1. Mỗi dòng có thể **Bỏ qua**
   (loại hẳn khỏi hàng đợi, ví dụ không muốn affiliate sản phẩm đó nữa) hoặc
   **Thử lại** (đưa về `pending` để chuẩn bị lại từ đầu, dùng cho sản phẩm bị
   lỗi). Mỗi dòng ở trạng thái "chờ chuẩn bị"/"sẵn sàng đăng" có checkbox —

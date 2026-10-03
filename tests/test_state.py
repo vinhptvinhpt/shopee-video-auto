@@ -155,12 +155,55 @@ def test_list_queue_filters_by_status(store: StateStore) -> None:
     [a, b, c] = store.get_pending_for_prepare(3)
     store.mark_prepare_failed(a.link)
 
-    pending_rows = store.list_queue(status="pending")
+    pending_rows, pending_total = store.list_queue(status="pending")
     assert {r.product.link for r in pending_rows} == {b.link, c.link}
+    assert pending_total == 2
 
-    failed_rows = store.list_queue(status="prepare_failed")
+    failed_rows, failed_total = store.list_queue(status="prepare_failed")
     assert len(failed_rows) == 1
+    assert failed_total == 1
     assert failed_rows[0].product.link == a.link
+
+
+def test_list_queue_search_matches_name_case_insensitive(store: StateStore) -> None:
+    store.enqueue_products(
+        [
+            Product(name="Áo thun nam cổ tròn", link="https://s.shopee.vn/a", product_url="https://shopee.vn/x/1"),
+            Product(name="Quần jean nữ ống suông", link="https://s.shopee.vn/b", product_url="https://shopee.vn/x/2"),
+        ]
+    )
+    items, total = store.list_queue(search="jean")
+    assert total == 1
+    assert items[0].product.name == "Quần jean nữ ống suông"
+
+    # literal % / _ in the search text must not act as SQL LIKE wildcards
+    items2, total2 = store.list_queue(search="100%")
+    assert total2 == 0
+
+
+def test_list_queue_min_sales_filter(store: StateStore) -> None:
+    store.enqueue_products(
+        [
+            Product(name="A", link="https://s.shopee.vn/a", product_url="https://shopee.vn/x/1", sales_count=1000),
+            Product(name="B", link="https://s.shopee.vn/b", product_url="https://shopee.vn/x/2", sales_count=500000),
+        ]
+    )
+    items, total = store.list_queue(min_sales=100_000)
+    assert total == 1
+    assert items[0].product.name == "B"
+
+
+def test_list_queue_pagination(store: StateStore) -> None:
+    store.enqueue_products(_products(25))
+    page1, total = store.list_queue(limit=10, offset=0)
+    page2, _ = store.list_queue(limit=10, offset=10)
+    page3, _ = store.list_queue(limit=10, offset=20)
+    assert total == 25
+    assert len(page1) == 10
+    assert len(page2) == 10
+    assert len(page3) == 5
+    all_links = {i.product.link for i in page1 + page2 + page3}
+    assert len(all_links) == 25  # no overlap/duplicates across pages
 
 
 def test_log_stage_and_recent_log(store: StateStore) -> None:
