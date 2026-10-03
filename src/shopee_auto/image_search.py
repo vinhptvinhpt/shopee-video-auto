@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from playwright.sync_api import BrowserContext, sync_playwright
+from playwright.sync_api import BrowserContext, Playwright
 
 from shopee_auto.config import ImageSearchConfig
 from shopee_auto.logger import get_logger
@@ -29,21 +29,23 @@ class CaptchaEncounteredError(RuntimeError):
 
 
 class GoogleLensSearch:
-    def __init__(self, cfg: ImageSearchConfig):
+    """Takes an already-started Playwright driver (see pipeline.py) rather
+    than starting its own -- Playwright's sync API only tolerates one
+    sync_playwright() driver per thread, and prepare_videos also needs one
+    for ThumbnailFetcher in the same thread."""
+
+    def __init__(self, playwright: Playwright, cfg: ImageSearchConfig):
+        self._playwright = playwright
         self._cfg = cfg
-        self._playwright = None
         self._context: BrowserContext | None = None
 
     def __enter__(self) -> "GoogleLensSearch":
-        self._playwright = sync_playwright().start()
         self._context = self._playwright.chromium.launch(headless=self._cfg.headless).new_context()
         return self
 
     def __exit__(self, *exc: object) -> None:
         if self._context:
             self._context.close()
-        if self._playwright:
-            self._playwright.stop()
 
     def search_by_image(self, image_path: Path) -> list[str]:
         sel = self._cfg.selectors

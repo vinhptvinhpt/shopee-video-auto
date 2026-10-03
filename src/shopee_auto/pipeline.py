@@ -22,6 +22,8 @@ from __future__ import annotations
 import dataclasses
 from pathlib import Path
 
+from playwright.sync_api import sync_playwright
+
 from shopee_auto.config import AppConfig
 from shopee_auto.image_search import CaptchaEncounteredError, GoogleLensSearch
 from shopee_auto.logger import get_logger
@@ -94,7 +96,11 @@ class Pipeline:
         log.info("Chuẩn bị video cho %d sản phẩm", len(candidates))
 
         results: list[PrepareResult] = []
-        with product_source.ThumbnailFetcher() as thumbs, GoogleLensSearch(self.cfg.image_search) as lens:
+        # One Playwright driver shared by both -- the sync API only tolerates
+        # a single sync_playwright() instance per thread.
+        with sync_playwright() as pw, product_source.ThumbnailFetcher(pw) as thumbs, GoogleLensSearch(
+            pw, self.cfg.image_search
+        ) as lens:
             for product in candidates:
                 results.append(self._prepare_one(product, thumbs, lens))
 

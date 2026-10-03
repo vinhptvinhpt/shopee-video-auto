@@ -22,7 +22,7 @@ import re
 import urllib.request
 from pathlib import Path
 
-from playwright.sync_api import Browser, sync_playwright
+from playwright.sync_api import Browser, Playwright
 
 from shopee_auto.logger import get_logger
 
@@ -83,23 +83,25 @@ def load_products_from_file(path: Path, min_sales: int) -> list[Product]:
 
 class ThumbnailFetcher:
     """Open once per batch (like GoogleLensSearch) and reuse across every
-    product in the run, instead of launching a fresh browser per item."""
+    product in the run, instead of launching a fresh browser per item.
 
-    def __init__(self, headless: bool = True):
+    Takes an already-started Playwright driver rather than starting its
+    own -- Playwright's sync API only tolerates one sync_playwright()
+    driver per thread, and prepare_videos also needs one for
+    GoogleLensSearch in the same thread (see pipeline.py)."""
+
+    def __init__(self, playwright: Playwright, headless: bool = True):
+        self._playwright = playwright
         self._headless = headless
-        self._playwright = None
         self._browser: Browser | None = None
 
     def __enter__(self) -> "ThumbnailFetcher":
-        self._playwright = sync_playwright().start()
         self._browser = self._playwright.chromium.launch(headless=self._headless)
         return self
 
     def __exit__(self, *exc: object) -> None:
         if self._browser:
             self._browser.close()
-        if self._playwright:
-            self._playwright.stop()
 
     def fetch_url(self, product_url: str, timeout: float = 20) -> str:
         page = self._browser.new_page()
