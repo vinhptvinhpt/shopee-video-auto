@@ -16,6 +16,13 @@ daily_target: 5 # videos to publish per calendar day
 product_source:
   input_dir: "./data/input_csv"
   min_sales: 100 # parsed from the CSV's "Doanh thu" column, e.g. "300k+" -> 300000
+  # Shopee redirects a Playwright-launched browser to /verify/traffic/error
+  # when fetching a product page (bot check) -- set this once you've
+  # launched Chrome by hand with --remote-debugging-port=9222 so thumbnails
+  # are fetched through that real browser instead. See README "Thumbnail bị
+  # Shopee chặn (verify/traffic/error)". Leave null to use Playwright's own
+  # browser (works until/unless you hit this block).
+  cdp_endpoint: null
 
 image_search:
   engine: "google_lens"

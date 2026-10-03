@@ -112,6 +112,35 @@ từ DOM sau khi trang render xong — gọi HTTP GET thuần không đủ vì t
 phẩm Shopee là SPA, ảnh chỉ xuất hiện sau khi JavaScript chạy, không có
 trong HTML thô trả về ban đầu.
 
+## Thumbnail bị Shopee chặn (verify/traffic/error)
+
+Shopee có hệ thống chống bot riêng cho cả trang sản phẩm công khai (không
+chỉ portal affiliate): nếu bạn thấy log báo `URL cuối` là
+`shopee.vn/verify/traffic/error?...`, nghĩa là Shopee đã phát hiện trình
+duyệt do Playwright **tự mở** và chặn ngay, bất kể trang sản phẩm đó có
+thật hay không. Đây không phải lỗi tạm thời — Shopee chặn dựa trên việc
+trình duyệt được khởi chạy bởi phần mềm tự động hóa, dù cố lấy ảnh kiểu gì
+cũng vô ích nếu vẫn dùng trình duyệt do Playwright tự mở.
+
+Cách khắc phục giống hệt cách đã dùng để qua chặn đăng nhập Google trước
+đây: đừng để Playwright **tự mở** trình duyệt — tự tay mở một cửa sổ
+Chrome thật, rồi cho Playwright **kết nối vào** cửa sổ đó sau (Chrome
+DevTools Protocol). Vì trình duyệt không hề được khởi chạy bởi phần mềm tự
+động hóa, Shopee không có gì để chặn (không cần đăng nhập Shopee trong cửa
+sổ này — trang sản phẩm công khai, chỉ cần trông giống trình duyệt thật).
+
+1. Đóng hết Chrome hiện tại (kiểm tra Task Manager không còn tiến trình
+   `chrome.exe` nào).
+2. Mở Command Prompt, chạy (sửa đường dẫn nếu Chrome cài chỗ khác):
+   ```cmd
+   "C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir="C:\shopee-chrome-profile"
+   ```
+   **Để nguyên cửa sổ này mở** suốt thời gian chạy "Tìm & tải video" — mỗi
+   lần chạy, trình duyệt sẽ tự mở/đóng tab trong chính cửa sổ này.
+3. Sửa `config/config.yaml`: đặt `product_source.cdp_endpoint: "http://localhost:9222"`.
+4. Chạy lại "Tìm & tải video" (hoặc `shopee-auto prepare`) — lần này sẽ kết
+   nối vào đúng cửa sổ Chrome bạn vừa mở, không mở cửa sổ mới nào nữa.
+
 ## Calibrating selectors (bắt buộc trước khi chạy thật)
 
 Selector cho Google Lens và app Shopee trên điện thoại **không được đoán

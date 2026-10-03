@@ -116,21 +116,44 @@ class ThumbnailFetcher:
     Takes an already-started Playwright driver rather than starting its
     own -- Playwright's sync API only tolerates one sync_playwright()
     driver per thread, and prepare_videos also needs one for
-    GoogleLensSearch in the same thread (see pipeline.py)."""
+    GoogleLensSearch in the same thread (see pipeline.py).
 
-    def __init__(self, playwright: Playwright, headless: bool = True, debug_dir: Path | None = None):
+    Shopee redirects a Playwright-*launched* browser straight to
+    /verify/traffic/error (confirmed: real product page, real HTTP 200,
+    final URL is the verify/error page every time). cdp_endpoint, when
+    set, attaches to a real Chrome window you launched and logged into by
+    hand instead -- same workaround already proven against Google's own
+    automation block elsewhere in this project. That browser was never
+    launched with Playwright's automation flags in the first place, so
+    there's nothing for Shopee's check to key off."""
+
+    def __init__(
+        self,
+        playwright: Playwright,
+        headless: bool = True,
+        debug_dir: Path | None = None,
+        cdp_endpoint: str | None = None,
+    ):
         self._playwright = playwright
         self._headless = headless
         self._debug_dir = debug_dir
+        self._cdp_endpoint = cdp_endpoint
         self._browser: Browser | None = None
+        self._owns_browser = True
 
     def __enter__(self) -> "ThumbnailFetcher":
-        self._browser = self._playwright.chromium.launch(headless=self._headless)
+        if self._cdp_endpoint:
+            self._browser = self._playwright.chromium.connect_over_cdp(self._cdp_endpoint)
+            self._owns_browser = False
+        else:
+            self._browser = self._playwright.chromium.launch(headless=self._headless)
+            self._owns_browser = True
         return self
 
     def __exit__(self, *exc: object) -> None:
-        if self._browser:
+        if self._browser and self._owns_browser:
             self._browser.close()
+        # else: it's your real Chrome window (connected via CDP) -- leave it running.
 
     def fetch_url(self, product_url: str, timeout: float = 20) -> str:
         page = self._browser.new_page()

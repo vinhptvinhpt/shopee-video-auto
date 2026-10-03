@@ -100,7 +100,7 @@ class Pipeline:
         # a single sync_playwright() instance per thread.
         debug_dir = self.cfg.logging.log_dir / "thumbnail_debug"
         with sync_playwright() as pw, product_source.ThumbnailFetcher(
-            pw, debug_dir=debug_dir
+            pw, debug_dir=debug_dir, cdp_endpoint=self.cfg.product_source.cdp_endpoint
         ) as thumbs, GoogleLensSearch(pw, self.cfg.image_search) as lens:
             for product in candidates:
                 results.append(self._prepare_one(product, thumbs, lens))

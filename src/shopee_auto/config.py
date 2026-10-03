@@ -20,6 +20,13 @@ class ProductSourceConfig:
 
     input_dir: Path
     min_sales: int
+    # Shopee redirects a Playwright-launched browser's product page requests
+    # to shopee.vn/verify/traffic/error (bot check). Set to e.g.
+    # "http://localhost:9222" (Chrome launched by hand with
+    # --remote-debugging-port=9222) to fetch thumbnails through a real,
+    # manually-launched Chrome instead -- see README "Thumbnail bị Shopee
+    # chặn (verify/traffic/error)". null = launch Playwright's own browser.
+    cdp_endpoint: str | None
 
 
 @dataclasses.dataclass
@@ -93,6 +100,7 @@ def load_config(path: Path | str = DEFAULT_CONFIG_PATH) -> AppConfig:
         product_source=ProductSourceConfig(
             input_dir=_resolve(root_dir, ps["input_dir"]),
             min_sales=ps["min_sales"],
+            cdp_endpoint=ps.get("cdp_endpoint"),
         ),
         image_search=ImageSearchConfig(
             engine=ims["engine"],
