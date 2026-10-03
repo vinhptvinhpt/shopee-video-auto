@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from playwright.sync_api import Browser, Playwright
+from playwright.sync_api import Browser, BrowserContext, Playwright
 
 from shopee_auto.config import ImageSearchConfig
 from shopee_auto.logger import get_logger
@@ -34,24 +34,20 @@ class GoogleLensSearch:
     sync_playwright() driver per thread, and prepare_videos also needs one
     for ThumbnailFetcher in the same thread.
 
-    cdp_endpoint, when set, attaches to the same real, manually-launched
-    Chrome window used for thumbnails (see ThumbnailFetcher) instead of
-    launching a separate Playwright-controlled browser -- this rules out
-    Google's automation-fingerprint check (confirmed elsewhere in this
-    project, e.g. Shopee's /verify/traffic/error) as a cause, independent
-    of whatever else is going on with a given result.
-
-    Observed in production logs (real runs, 2 different product images):
-    the page landed on had zero <a href> elements that were actual result
-    content -- every link was Google's own search-results-page chrome
-    (nav/footer). That is consistent with the visual-match grid being
-    rendered inside a child <iframe> that a main-frame-only query would
-    completely miss, which is why search_by_image scans every frame via
-    page.frames rather than just page.locator(). This was verified against
-    a local HTML fixture reproducing that exact shape (outer chrome +
-    iframe with the real result links) -- not yet confirmed against the
-    live google.com page, since this project's sandbox can't reach it
-    (network policy blocks google.com/lens.google.com here)."""
+    Confirmed by a real run's log (frame list was exactly one entry,
+    "https://www.google.com/?olud=", and a raw text scan found zero
+    mentions of "tiktok" anywhere on the page): this is not bot detection
+    and not an iframe-nested result grid -- it's the bare Google homepage,
+    meaning lens.google.com/upload never actually processed the image at
+    all. The likely cause: Browser.new_page() on a CDP connection creates a
+    brand-new, cookie-less context instead of reusing the real Chrome
+    window's existing one, and visiting Lens cold (no consent/session
+    cookies at all) gets redirected straight to the homepage. Fixed by
+    reusing the CDP-attached browser's existing context (its real cookies)
+    instead of creating a fresh one -- same reasoning as using a real,
+    manually-launched Chrome in the first place, just carried one step
+    further: attaching to it is pointless if you then open a blank-slate
+    context inside it anyway."""
 
     def __init__(
         self,
@@ -65,19 +61,27 @@ class GoogleLensSearch:
         self._debug_dir = debug_dir
         self._cdp_endpoint = cdp_endpoint
         self._browser: Browser | None = None
+        self._context: BrowserContext | None = None
         self._owns_browser = True
 
     def __enter__(self) -> "GoogleLensSearch":
         if self._cdp_endpoint:
             self._browser = self._playwright.chromium.connect_over_cdp(self._cdp_endpoint)
             self._owns_browser = False
+            # Reuse the real Chrome's existing context (its real cookies --
+            # consent, session, etc.) instead of new_page()'s implicit
+            # fresh/incognito context. See class docstring: a cookie-less
+            # context gets Lens's upload page redirected straight to the
+            # plain homepage, confirmed via a real run's log.
+            self._context = self._browser.contexts[0] if self._browser.contexts else self._browser.new_context()
         else:
             self._browser = self._playwright.chromium.launch(headless=self._cfg.headless)
             self._owns_browser = True
+            self._context = self._browser.new_context()
         return self
 
     def __exit__(self, *exc: object) -> None:
-        if self._browser and self._owns_browser:
+        if self._owns_browser and self._browser:
             self._browser.close()
         # else: it's your real Chrome window (connected via CDP) -- leave it running.
 
@@ -92,7 +96,7 @@ class GoogleLensSearch:
         # would almost always discard the handful of TikTok links before
         # they're even checked.
         selector = sel.get("result_link") or "a[href]"
-        page = self._browser.new_page()
+        page = self._context.new_page()
         try:
             page.goto(self._cfg.search_url, wait_until="networkidle")
 
